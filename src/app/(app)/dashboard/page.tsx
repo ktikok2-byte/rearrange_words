@@ -59,15 +59,16 @@ export default async function DashboardPage() {
   const tenWeekly = slice(tenWeeksAgo)
   const yearly    = slice(yearAgo)
 
-  // ── 문제 현황 (고유 문장 단위) ──────────────────────────────────
+  // ── 문제 현황 (attempts 기준 — 전체 성과·기간별 성과와 동일 소스) ──
+  const correctCount = totalCorrect
+  const wrongCount   = totalWrong
+
+  // 고유 문장 수는 별도 표시용
   const { data: statusCounts } = await supabase
     .from('user_sentence_status')
     .select('status')
     .eq('user_id', user.id)
-
-  const correctCount = statusCounts?.filter(s => s.status === 'correct').length ?? 0
-  const wrongCount   = statusCounts?.filter(s => s.status === 'wrong').length   ?? 0
-  const uniqueSolved = correctCount + wrongCount
+  const uniqueSolved = statusCounts?.length ?? 0
 
   // ── 레벨 범위 표시 (새 공식: level n → n+1 ~ n+3 단어) ──────────
   const lv      = profile?.current_level ?? 1
@@ -141,14 +142,18 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Sentence Status — 고유 문장 단위, 마지막 결과 기준 */}
+      {/* Sentence Status — attempts 기준(전체 성과와 동일) + 고유 문장 수 */}
       <div>
         <h3 className="text-lg font-bold text-slate-700 mb-1">문제 현황</h3>
-        <p className="text-xs text-slate-400 mb-3">고유 문장 수 기준 · 가장 최근 결과로 분류</p>
+        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 전체 기간 · 전체 성과와 동일 기준</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <StatCard label="맞은 문장" value={correctCount} />
-          <StatCard label="틀린 문장" value={wrongCount} />
-          <StatCard label="도전한 문장" value={uniqueSolved} sub={`현재 스트릭 ${profile?.current_streak ?? 0}`} />
+          <StatCard label="정답 횟수" value={correctCount} />
+          <StatCard label="오답 횟수" value={wrongCount} />
+          <StatCard
+            label="도전한 고유 문장"
+            value={uniqueSolved}
+            sub={`현재 스트릭 ${profile?.current_streak ?? 0}`}
+          />
         </div>
       </div>
 
