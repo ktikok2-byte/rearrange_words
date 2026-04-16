@@ -29,3 +29,6 @@ Thumbs.db
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Tatoeba cache (large raw data files)
+.tatoeba_cache/

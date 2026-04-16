@@ -68,7 +68,7 @@ function LoginContent() {
       <main className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-extrabold text-slate-900">
+            <h1 className="text-3xl font-extrabold">
               <span className="text-blue-600">Word</span>Order
             </h1>
             <p className="text-slate-500 mt-2">학습을 계속하려면 로그인하세요</p>
@@ -120,7 +120,22 @@ function LoginContent() {
             </button>
           </form>
 
-          <p className="text-center text-sm text-slate-500 mt-6">
+          <div className="mt-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex-1 h-px bg-slate-200" />
+              <span className="text-xs text-slate-400">또는</span>
+              <div className="flex-1 h-px bg-slate-200" />
+            </div>
+            <Link href="/guest"
+              className="w-full flex items-center justify-center gap-2 py-3 bg-slate-100 text-slate-600 font-medium rounded-xl hover:bg-slate-200 transition-colors">
+              👤 게스트로 시작하기
+            </Link>
+            <p className="text-center text-xs text-slate-400 mt-2">
+              로그인 없이 체험 가능 · 브라우저를 닫으면 기록이 초기화됩니다
+            </p>
+          </div>
+
+          <p className="text-center text-sm text-slate-500 mt-4">
             계정이 없으신가요?{' '}
             <Link href="/register" className="text-blue-600 font-medium hover:underline">회원가입</Link>
           </p>

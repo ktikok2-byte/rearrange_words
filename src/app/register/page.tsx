@@ -125,7 +125,7 @@ export default function RegisterPage() {
       <main className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
-            <h1 className="text-3xl font-extrabold text-slate-900">
+            <h1 className="text-3xl font-extrabold">
               <span className="text-blue-600">Word</span>Order
             </h1>
             <p className="text-slate-500 mt-2">새 계정을 만들어보세요</p>
