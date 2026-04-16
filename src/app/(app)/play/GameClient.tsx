@@ -303,6 +303,18 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }
 
   if (phase === 'mode-select') {
+    const wrongCount   = Object.values(userStatuses).filter(s => s === 'wrong').length
+    const correctCount = Object.values(userStatuses).filter(s => s === 'correct').length
+    const unsolvedCount = filterSentencesByMode(sentences, userStatuses, 'unsolved', profile.current_level).length
+    const allCount = sentences.length
+
+    const counts: Record<GameMode, number> = {
+      unsolved: unsolvedCount,
+      wrong:    wrongCount,
+      correct:  correctCount,
+      all:      allCount,
+    }
+
     return (
       <div className="max-w-lg mx-auto">
         <h2 className="text-2xl font-bold text-slate-800 mb-2">게임 모드 선택</h2>
@@ -319,14 +331,23 @@ export default function GameClient({ userId, initialProfile }: Props) {
             { mode: 'all' as GameMode, label: '전체 문제 풀기', desc: '모든 문제를 랜덤으로 풀어요.', color: 'slate' },
           ] as const).map(({ mode: m, label, desc, color }) => (
             <button key={m} onClick={() => startGame(m)}
-              disabled={sentences.length === 0}
-              className={`w-full text-left px-5 py-4 rounded-xl border-2 transition-all bg-white disabled:opacity-50
+              disabled={sentences.length === 0 || counts[m] === 0}
+              className={`w-full text-left px-5 py-4 rounded-xl border-2 transition-all bg-white disabled:opacity-40
                 ${color === 'blue' ? 'border-blue-200 hover:border-blue-500 hover:bg-blue-50' : ''}
                 ${color === 'red' ? 'border-red-200 hover:border-red-500 hover:bg-red-50' : ''}
                 ${color === 'green' ? 'border-green-200 hover:border-green-500 hover:bg-green-50' : ''}
                 ${color === 'slate' ? 'border-slate-200 hover:border-slate-400 hover:bg-slate-50' : ''}`}
             >
-              <div className="font-semibold text-slate-800">{label}</div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-800">{label}</span>
+                <span className={`text-sm font-bold px-2 py-0.5 rounded-full
+                  ${color === 'blue'  ? 'bg-blue-100 text-blue-600'   : ''}
+                  ${color === 'red'   ? 'bg-red-100 text-red-600'     : ''}
+                  ${color === 'green' ? 'bg-green-100 text-green-600' : ''}
+                  ${color === 'slate' ? 'bg-slate-100 text-slate-600' : ''}`}>
+                  {counts[m]}문장
+                </span>
+              </div>
               <div className="text-sm text-slate-500 mt-0.5">{desc}</div>
             </button>
           ))}
