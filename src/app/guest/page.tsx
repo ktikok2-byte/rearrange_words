@@ -56,6 +56,8 @@ export default function GuestPage() {
     return pool[Math.floor(Math.random() * pool.length)]
   }
 
+  const [ready, setReady] = useState(false)
+
   const launchSentence = (sentence: Sentence) => {
     const words = tokenize(sentence.target_text)
     setCurrentSentence(sentence)
@@ -63,13 +65,20 @@ export default function GuestPage() {
     setAnswerWords([])
     setUsedIndices(new Set())
     setTimerSeconds(calcTimerSeconds(words.length))
-    setTimerPaused(false)
-    setStartTime(new Date())
+    setTimerPaused(true)
+    setReady(true)
+    setStartTime(null)
     setPhase('playing')
   }
 
+  const handleStartTimer = () => {
+    setReady(false)
+    setTimerPaused(false)
+    setStartTime(new Date())
+  }
+
   const submitAnswer = useCallback((answer: string[]) => {
-    if (!currentSentence || !startTime) return
+    if (!currentSentence) return
     setTimerPaused(true)
 
     const correctWords = tokenize(currentSentence.target_text)
@@ -255,37 +264,50 @@ export default function GuestPage() {
               {currentSentence.source_text}
             </div>
 
-            <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-              ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
-              {answerWords.length === 0 && (
-                <span className="text-slate-300 text-sm self-center w-full text-center">
-                  아래 단어를 순서대로 클릭하세요
-                </span>
-              )}
-              {answerWords.map((word, i) => (
-                <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
-              ))}
-            </div>
+            {ready ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-6">
+                <p className="text-slate-400 text-sm">준비되면 아래 버튼을 누르세요</p>
+                <button
+                  onClick={handleStartTimer}
+                  className="px-10 py-4 bg-blue-600 text-white text-lg font-bold rounded-2xl hover:bg-blue-700 transition-colors shadow-lg">
+                  ▶ 시작
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
+                  ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
+                  {answerWords.length === 0 && (
+                    <span className="text-slate-300 text-sm self-center w-full text-center">
+                      아래 단어를 순서대로 클릭하세요
+                    </span>
+                  )}
+                  {answerWords.map((word, i) => (
+                    <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+                  ))}
+                </div>
 
-            <div className="flex flex-wrap gap-2">
-              {shuffledWords.map((word, i) =>
-                !usedIndices.has(i) && (
-                  <WordCard key={i} word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
-                )
-              )}
-            </div>
+                <div className="flex flex-wrap gap-2">
+                  {shuffledWords.map((word, i) =>
+                    !usedIndices.has(i) && (
+                      <WordCard key={i} word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
+                    )
+                  )}
+                </div>
 
-            <div className="flex gap-3">
-              <button onClick={() => { setAnswerWords([]); setUsedIndices(new Set()) }}
-                className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
-                초기화
-              </button>
-              <button onClick={() => answerWords.length > 0 && submitAnswer(answerWords)}
-                disabled={answerWords.length === 0}
-                className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
-                제출
-              </button>
-            </div>
+                <div className="flex gap-3">
+                  <button onClick={() => { setAnswerWords([]); setUsedIndices(new Set()) }}
+                    className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                    초기화
+                  </button>
+                  <button onClick={() => answerWords.length > 0 && submitAnswer(answerWords)}
+                    disabled={answerWords.length === 0}
+                    className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                    제출
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </main>
       </div>

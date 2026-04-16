@@ -153,6 +153,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
   }, [sentences, userStatuses, profile, userId, findNextSentenceAndLevel, pickNextSentence, triggerRefill, supabase])
 
+  const [ready, setReady] = useState(false)
+
   const launchSentence = (sentence: Sentence, level: number, selectedMode: GameMode) => {
     const words = tokenize(sentence.target_text)
     const shuffled = shuffleArray(words)
@@ -161,10 +163,17 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setAnswerWords([])
     setUsedIndices(new Set())
     setTimerSeconds(calcTimerSeconds(words.length))
-    setTimerPaused(false)
-    setStartTime(new Date())
+    setTimerPaused(true)  // wait for start button
+    setReady(true)
+    setStartTime(null)
     setLastResult(null)
     setPhase('playing')
+  }
+
+  const handleStartTimer = () => {
+    setReady(false)
+    setTimerPaused(false)
+    setStartTime(new Date())
   }
 
   const handleWordClick = (word: string, index: number) => {
@@ -189,13 +198,17 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }
 
   const submitAnswer = useCallback(async (answer: string[]) => {
-    if (!currentSentence || !startTime) return
+    if (!currentSentence) return
+    if (!startTime) {
+      // answered before timer started (impossible in new flow, but guard)
+      setReady(false)
+    }
     setTimerPaused(true)
 
     const correctWords = tokenize(currentSentence.target_text)
     const isCorrect = checkAnswer(answer, correctWords)
     const now = new Date()
-    const timeTakenMs = isCorrect ? now.getTime() - startTime.getTime() : null
+    const timeTakenMs = isCorrect && startTime ? now.getTime() - startTime.getTime() : null
 
     if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
 
@@ -299,7 +312,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
         <h2 className="text-2xl font-bold text-slate-800 mb-2">게임 모드 선택</h2>
         <p className="text-slate-500 text-sm mb-6">
           현재 레벨: <span className="font-bold text-blue-600">Lv.{profile.current_level}</span>
-          {' '}({(profile.current_level - 1) * 3 + 1}~{profile.current_level * 3}단어)
+          {' '}({profile.current_level + 1}~{profile.current_level + 3}단어)
         </p>
 
         <div className="space-y-3">
@@ -418,37 +431,51 @@ export default function GameClient({ userId, initialProfile }: Props) {
           {currentSentence.source_text}
         </div>
 
-        <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-          ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
-          {answerWords.length === 0 && (
-            <span className="text-slate-300 text-sm self-center w-full text-center">
-              아래 단어를 순서대로 클릭하세요
-            </span>
-          )}
-          {answerWords.map((word, i) => (
-            <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
-          ))}
-        </div>
+        {ready ? (
+          /* 시작 전: 단어 가리고 시작 버튼 표시 */
+          <div className="flex flex-col items-center justify-center gap-4 py-6">
+            <p className="text-slate-400 text-sm">준비되면 아래 버튼을 누르세요</p>
+            <button
+              onClick={handleStartTimer}
+              className="px-10 py-4 bg-blue-600 text-white text-lg font-bold rounded-2xl hover:bg-blue-700 transition-colors shadow-lg">
+              ▶ 시작
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
+              ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
+              {answerWords.length === 0 && (
+                <span className="text-slate-300 text-sm self-center w-full text-center">
+                  아래 단어를 순서대로 클릭하세요
+                </span>
+              )}
+              {answerWords.map((word, i) => (
+                <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+              ))}
+            </div>
 
-        <div className="flex flex-wrap gap-2">
-          {shuffledWords.map((word, i) =>
-            !usedIndices.has(i) && (
-              <WordCard key={i} word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
-            )
-          )}
-        </div>
+            <div className="flex flex-wrap gap-2">
+              {shuffledWords.map((word, i) =>
+                !usedIndices.has(i) && (
+                  <WordCard key={i} word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
+                )
+              )}
+            </div>
 
-        <div className="flex gap-3">
-          <button onClick={() => { setAnswerWords([]); setUsedIndices(new Set()) }}
-            className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
-            초기화
-          </button>
-          <button onClick={() => answerWords.length > 0 && submitAnswer(answerWords)}
-            disabled={answerWords.length === 0}
-            className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
-            제출
-          </button>
-        </div>
+            <div className="flex gap-3">
+              <button onClick={() => { setAnswerWords([]); setUsedIndices(new Set()) }}
+                className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                초기화
+              </button>
+              <button onClick={() => answerWords.length > 0 && submitAnswer(answerWords)}
+                disabled={answerWords.length === 0}
+                className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                제출
+              </button>
+            </div>
+          </>
+        )}
       </div>
     )
   }

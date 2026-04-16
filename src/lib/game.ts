@@ -22,8 +22,9 @@ export function checkAnswer(userWords: string[], correct: string[]): boolean {
   return userWords.every((w, i) => w === correct[i])
 }
 
+// Level n → (n+1)~(n+2) words, so word count w belongs to level max(1, w-1)
 export function getLevelForWordCount(wordCount: number): number {
-  return Math.ceil(wordCount / 3)
+  return Math.max(1, wordCount - 1)
 }
 
 export function getWordRangeForLevel(level: number): [number, number] {

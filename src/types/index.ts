@@ -78,8 +78,7 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
   en: 'English',
 }
 
+// Level n → (n+1)~(n+3) words  (Level 1: 2~4, Level 2: 3~5, Level 3: 4~6, ...)
 export const LEVEL_WORD_RANGE = (level: number): [number, number] => {
-  const min = (level - 1) * 3 + 1
-  const max = level * 3
-  return [min, max]
+  return [level + 1, level + 3]
 }
