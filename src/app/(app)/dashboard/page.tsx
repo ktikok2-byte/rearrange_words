@@ -24,45 +24,55 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .single()
 
-  // Count by time periods (unsolved mode only)
-  const now = new Date()
-  const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0)
-  const weekStart = new Date(now); weekStart.setDate(now.getDate() - 7)
-  const tenWeekStart = new Date(now); tenWeekStart.setDate(now.getDate() - 70)
-  const yearStart = new Date(now); yearStart.setFullYear(now.getFullYear() - 1)
+  // ── 전체 시도 기록 (unsolved 모드) ──────────────────────────────
+  // 단일 소스(attempts 테이블)로 통일 → 전체/기간별 성과가 항상 일치
+  const { data: allAttempts } = await supabase
+    .from('attempts')
+    .select('is_correct, completed_at')
+    .eq('user_id', user.id)
+    .eq('mode', 'unsolved')
 
-  const fetchStats = async (since: Date) => {
-    const { data } = await supabase
-      .from('attempts')
-      .select('is_correct')
-      .eq('user_id', user.id)
-      .eq('mode', 'unsolved')
-      .gte('created_at', since.toISOString())
-    const total = data?.length ?? 0
-    const correct = data?.filter(a => a.is_correct).length ?? 0
-    return { total, correct }
+  const totalSolved  = allAttempts?.length ?? 0
+  const totalCorrect = allAttempts?.filter(a => a.is_correct).length ?? 0
+  const totalWrong   = totalSolved - totalCorrect
+  const accuracy     = totalSolved > 0 ? Math.round(totalCorrect / totalSolved * 100) : 0
+
+  // ── 기간별 집계 (completed_at 기준, 클라이언트 UTC 자정과 맞추기 위해 ISO 기준으로) ──
+  const now = new Date()
+  // UTC 기준 오늘 자정 (서버와 DB 모두 UTC)
+  const todayUTC      = now.toISOString().slice(0, 10) + 'T00:00:00.000Z'
+  const weekAgo       = new Date(now); weekAgo.setUTCDate(now.getUTCDate() - 7)
+  const tenWeeksAgo   = new Date(now); tenWeeksAgo.setUTCDate(now.getUTCDate() - 70)
+  const yearAgo       = new Date(now); yearAgo.setUTCFullYear(now.getUTCFullYear() - 1)
+
+  const slice = (since: string | Date) => {
+    const iso = typeof since === 'string' ? since : since.toISOString()
+    const sub = allAttempts?.filter(a => a.completed_at >= iso) ?? []
+    return {
+      total:   sub.length,
+      correct: sub.filter(a => a.is_correct).length,
+    }
   }
 
-  const [daily, weekly, tenWeekly, yearly] = await Promise.all([
-    fetchStats(todayStart),
-    fetchStats(weekStart),
-    fetchStats(tenWeekStart),
-    fetchStats(yearStart),
-  ])
+  const daily     = slice(todayUTC)
+  const weekly    = slice(weekAgo)
+  const tenWeekly = slice(tenWeeksAgo)
+  const yearly    = slice(yearAgo)
 
+  // ── 문제 현황 (고유 문장 단위) ──────────────────────────────────
   const { data: statusCounts } = await supabase
     .from('user_sentence_status')
     .select('status')
     .eq('user_id', user.id)
 
   const correctCount = statusCounts?.filter(s => s.status === 'correct').length ?? 0
-  const wrongCount = statusCounts?.filter(s => s.status === 'wrong').length ?? 0
+  const wrongCount   = statusCounts?.filter(s => s.status === 'wrong').length   ?? 0
+  const uniqueSolved = correctCount + wrongCount
 
-  const accuracy = profile?.total_solved
-    ? Math.round((profile.total_correct / profile.total_solved) * 100)
-    : 0
-
-  const [minWords, maxWords] = [(profile?.current_level - 1) * 3 + 1, profile?.current_level * 3]
+  // ── 레벨 범위 표시 (새 공식: level n → n+1 ~ n+3 단어) ──────────
+  const lv      = profile?.current_level ?? 1
+  const minWords = lv + 1
+  const maxWords = lv + 3
 
   return (
     <div className="space-y-8">
@@ -91,7 +101,7 @@ export default async function DashboardPage() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <div className="text-sm opacity-80">현재 레벨</div>
-            <div className="text-4xl font-extrabold">Lv.{profile?.current_level}</div>
+            <div className="text-4xl font-extrabold">Lv.{lv}</div>
             <div className="text-sm opacity-80 mt-1">{minWords}~{maxWords}단어 문장</div>
           </div>
           <div className="text-right text-sm opacity-80 space-y-1">
@@ -107,35 +117,38 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Overall Stats */}
+      {/* Overall Stats — attempts 테이블 기준, 기간별 성과와 동일 소스 */}
       <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-3">전체 성과</h3>
+        <h3 className="text-lg font-bold text-slate-700 mb-1">전체 성과</h3>
+        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 전체 기간 · 중복 시도 포함</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="총 푼 문제" value={profile?.total_solved ?? 0} />
-          <StatCard label="총 정답" value={profile?.total_correct ?? 0} />
-          <StatCard label="총 오답" value={profile?.total_wrong ?? 0} />
-          <StatCard label="전체 정답률" value={`${accuracy}%`} />
+          <StatCard label="총 시도" value={totalSolved} />
+          <StatCard label="정답" value={totalCorrect} />
+          <StatCard label="오답" value={totalWrong} />
+          <StatCard label="정답률" value={`${accuracy}%`} />
         </div>
       </div>
 
       {/* Period Stats */}
       <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-3">기간별 성과 <span className="text-sm font-normal text-slate-400">(안풀었던 문제 기준)</span></h3>
+        <h3 className="text-lg font-bold text-slate-700 mb-1">기간별 성과</h3>
+        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 중복 시도 포함 · UTC 기준</p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="오늘 푼 문제" value={daily.total} sub={`정답 ${daily.correct}개`} />
-          <StatCard label="1주일" value={weekly.total} sub={`정답 ${weekly.correct}개`} />
+          <StatCard label="오늘" value={daily.total}     sub={`정답 ${daily.correct}개`} />
+          <StatCard label="1주일" value={weekly.total}    sub={`정답 ${weekly.correct}개`} />
           <StatCard label="10주" value={tenWeekly.total} sub={`정답 ${tenWeekly.correct}개`} />
-          <StatCard label="1년" value={yearly.total} sub={`정답 ${yearly.correct}개`} />
+          <StatCard label="1년" value={yearly.total}     sub={`정답 ${yearly.correct}개`} />
         </div>
       </div>
 
-      {/* Sentence Status */}
+      {/* Sentence Status — 고유 문장 단위, 마지막 결과 기준 */}
       <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-3">문제 현황</h3>
+        <h3 className="text-lg font-bold text-slate-700 mb-1">문제 현황</h3>
+        <p className="text-xs text-slate-400 mb-3">고유 문장 수 기준 · 가장 최근 결과로 분류</p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <StatCard label="맞은 문제" value={correctCount} />
-          <StatCard label="틀린 문제" value={wrongCount} />
-          <StatCard label="현재 스트릭" value={`${profile?.current_streak ?? 0}일`} />
+          <StatCard label="맞은 문장" value={correctCount} />
+          <StatCard label="틀린 문장" value={wrongCount} />
+          <StatCard label="도전한 문장" value={uniqueSolved} sub={`현재 스트릭 ${profile?.current_streak ?? 0}`} />
         </div>
       </div>
 
