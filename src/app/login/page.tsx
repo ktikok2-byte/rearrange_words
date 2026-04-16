@@ -79,14 +79,14 @@ export default function LoginPage() {
               <label className="block text-sm font-medium text-slate-700 mb-1">이메일</label>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)} required
                 placeholder="your@email.com"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">비밀번호</label>
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} required
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
 

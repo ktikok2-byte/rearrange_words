@@ -154,28 +154,28 @@ export default function RegisterPage() {
               <label className="block text-sm font-medium text-slate-700 mb-1">사용자 이름</label>
               <input name="username" type="text" value={form.username} onChange={handleChange} required
                 placeholder="홍길동"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">이메일</label>
               <input name="email" type="email" value={form.email} onChange={handleChange} required
                 placeholder="your@email.com"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">비밀번호 <span className="text-slate-400 font-normal">(8자 이상)</span></label>
               <input name="password" type="password" value={form.password} onChange={handleChange} required
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">비밀번호 확인</label>
               <input name="confirmPassword" type="password" value={form.confirmPassword} onChange={handleChange} required
                 placeholder="••••••••"
-                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm text-slate-900 bg-white"
               />
             </div>
 
@@ -183,14 +183,14 @@ export default function RegisterPage() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">나의 모국어</label>
                 <select name="native_language" value={form.native_language} onChange={handleChange}
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white text-slate-900">
                   {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">학습 언어</label>
                 <select name="study_language" value={form.study_language} onChange={handleChange}
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white text-slate-900">
                   {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
                 </select>
               </div>
