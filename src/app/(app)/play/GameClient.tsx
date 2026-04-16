@@ -198,17 +198,13 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }
 
   const submitAnswer = useCallback(async (answer: string[]) => {
-    if (!currentSentence) return
-    if (!startTime) {
-      // answered before timer started (impossible in new flow, but guard)
-      setReady(false)
-    }
+    if (!currentSentence || !startTime) return
     setTimerPaused(true)
 
     const correctWords = tokenize(currentSentence.target_text)
     const isCorrect = checkAnswer(answer, correctWords)
     const now = new Date()
-    const timeTakenMs = isCorrect && startTime ? now.getTime() - startTime.getTime() : null
+    const timeTakenMs = isCorrect ? now.getTime() - startTime.getTime() : null
 
     if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
 
