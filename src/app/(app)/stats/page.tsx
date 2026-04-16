@@ -7,13 +7,12 @@ export default async function StatsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  // Fetch all unsolved attempts for stats
-  const { data: attempts } = await supabase
-    .from('attempts')
-    .select('is_correct, created_at, time_taken_ms, word_count')
+  const { data: rows } = await supabase
+    .from('user_sentence_status')
+    .select('unsolved_correct, solved_at')
     .eq('user_id', user.id)
-    .eq('mode', 'unsolved')
-    .order('created_at', { ascending: true })
+    .not('solved_at', 'is', null)
+    .order('solved_at', { ascending: true })
 
-  return <StatsClient attempts={attempts ?? []} />
+  return <StatsClient rows={rows ?? []} />
 }

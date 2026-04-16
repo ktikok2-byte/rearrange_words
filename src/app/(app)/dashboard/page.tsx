@@ -24,33 +24,31 @@ export default async function DashboardPage() {
     .eq('id', user.id)
     .single()
 
-  // ── 전체 시도 기록 (unsolved 모드) ──────────────────────────────
-  // 단일 소스(attempts 테이블)로 통일 → 전체/기간별 성과가 항상 일치
-  const { data: allAttempts } = await supabase
-    .from('attempts')
-    .select('is_correct, completed_at')
+  // ── 단일 소스: user_sentence_status (solved_at IS NOT NULL = unsolved 모드에서 풀린 문장) ──
+  const { data: solvedRows } = await supabase
+    .from('user_sentence_status')
+    .select('unsolved_correct, solved_at')
     .eq('user_id', user.id)
-    .eq('mode', 'unsolved')
+    .not('solved_at', 'is', null)
 
-  const totalSolved  = allAttempts?.length ?? 0
-  const totalCorrect = allAttempts?.filter(a => a.is_correct).length ?? 0
-  const totalWrong   = totalSolved - totalCorrect
+  const totalSolved  = solvedRows?.length ?? 0
+  const totalCorrect = solvedRows?.filter(r => r.unsolved_correct === true).length ?? 0
+  const totalWrong   = solvedRows?.filter(r => r.unsolved_correct === false).length ?? 0
   const accuracy     = totalSolved > 0 ? Math.round(totalCorrect / totalSolved * 100) : 0
 
-  // ── 기간별 집계 (completed_at 기준, 클라이언트 UTC 자정과 맞추기 위해 ISO 기준으로) ──
-  const now = new Date()
-  // UTC 기준 오늘 자정 (서버와 DB 모두 UTC)
-  const todayUTC      = now.toISOString().slice(0, 10) + 'T00:00:00.000Z'
-  const weekAgo       = new Date(now); weekAgo.setUTCDate(now.getUTCDate() - 7)
-  const tenWeeksAgo   = new Date(now); tenWeeksAgo.setUTCDate(now.getUTCDate() - 70)
-  const yearAgo       = new Date(now); yearAgo.setUTCFullYear(now.getUTCFullYear() - 1)
+  // ── 기간별 집계 (solved_at 기준) ──────────────────────────────────
+  const now         = new Date()
+  const todayUTC    = now.toISOString().slice(0, 10) + 'T00:00:00.000Z'
+  const weekAgo     = new Date(now); weekAgo.setUTCDate(now.getUTCDate() - 7)
+  const tenWeeksAgo = new Date(now); tenWeeksAgo.setUTCDate(now.getUTCDate() - 70)
+  const yearAgo     = new Date(now); yearAgo.setUTCFullYear(now.getUTCFullYear() - 1)
 
   const slice = (since: string | Date) => {
     const iso = typeof since === 'string' ? since : since.toISOString()
-    const sub = allAttempts?.filter(a => a.completed_at >= iso) ?? []
+    const sub = solvedRows?.filter(r => r.solved_at! >= iso) ?? []
     return {
       total:   sub.length,
-      correct: sub.filter(a => a.is_correct).length,
+      correct: sub.filter(r => r.unsolved_correct === true).length,
     }
   }
 
@@ -59,12 +57,8 @@ export default async function DashboardPage() {
   const tenWeekly = slice(tenWeeksAgo)
   const yearly    = slice(yearAgo)
 
-  // ── 고유 문장 수 (user_sentence_status 기준) ──────────────────────
-  const { data: statusCounts } = await supabase
-    .from('user_sentence_status')
-    .select('status')
-    .eq('user_id', user.id)
-  const uniqueSolved = statusCounts?.length ?? 0
+  // totalSolved = 고유 문장 수 (unsolved 모드는 문장당 1번만 풀리므로 일치)
+  const uniqueSolved = totalSolved
 
   // ── 레벨 범위 표시 (새 공식: level n → n+1 ~ n+3 단어) ──────────
   const lv      = profile?.current_level ?? 1
@@ -117,8 +111,7 @@ export default async function DashboardPage() {
       <div>
         <h3 className="text-lg font-bold text-slate-700 mb-3">전체 성과 <span className="text-sm font-normal text-slate-400">안풀었던 문제 모드 · 전체 기간</span></h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <StatCard label="도전한 고유 문장" value={uniqueSolved} />
-          <StatCard label="총 시도 횟수" value={totalSolved} sub={uniqueSolved !== totalSolved ? `고유 문장보다 ${totalSolved - uniqueSolved}회 더 많음` : undefined} />
+          <StatCard label="풀어본 문장 수" value={totalSolved} />
           <StatCard label="정답률" value={`${accuracy}%`} sub={`정답 ${totalCorrect} / 오답 ${totalWrong}`} />
           <StatCard label="현재 스트릭" value={`${profile?.current_streak ?? 0}연속`} sub="오답 시 초기화" />
           <StatCard label="최고 스트릭" value={`${profile?.longest_streak ?? 0}연속`} sub="역대 최고 연속 정답" />

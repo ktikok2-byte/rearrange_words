@@ -210,32 +210,32 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
     const newProfileData = mode === 'unsolved' ? calcNewProfile(profile, isCorrect) : {}
 
-    await supabase.from('attempts').insert({
-      user_id: userId,
-      sentence_id: currentSentence.id,
-      mode,
-      is_correct: isCorrect,
-      time_taken_ms: timeTakenMs,
-      word_count: correctWords.length,
-      level_at_attempt: profile.current_level,
-      started_at: startTime.toISOString(),
-      completed_at: now.toISOString(),
-    })
-
+    // attempts 테이블 제거 — user_sentence_status 단일 소스로 통합
     const newStatus = nextSentenceStatus(userStatuses[currentSentence.id] ?? 'unsolved', mode, isCorrect)
     const { data: existing } = await supabase
-      .from('user_sentence_status').select('id, attempt_count')
+      .from('user_sentence_status').select('id, attempt_count, solved_at')
       .eq('user_id', userId).eq('sentence_id', currentSentence.id).single()
+
+    // unsolved 모드에서 첫 풀이: solved_at, unsolved_correct 고정 기록
+    const unsolvedFields = (mode === 'unsolved' && !existing?.solved_at)
+      ? { solved_at: now.toISOString(), unsolved_correct: isCorrect }
+      : {}
 
     if (existing) {
       await supabase.from('user_sentence_status').update({
-        status: newStatus, last_attempted_at: now.toISOString(),
+        status: newStatus,
+        last_attempted_at: now.toISOString(),
         attempt_count: existing.attempt_count + 1,
+        ...unsolvedFields,
       }).eq('id', existing.id)
     } else {
       await supabase.from('user_sentence_status').insert({
-        user_id: userId, sentence_id: currentSentence.id,
-        status: newStatus, last_attempted_at: now.toISOString(), attempt_count: 1,
+        user_id: userId,
+        sentence_id: currentSentence.id,
+        status: newStatus,
+        last_attempted_at: now.toISOString(),
+        attempt_count: 1,
+        ...unsolvedFields,
       })
     }
 
