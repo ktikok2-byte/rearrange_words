@@ -1,17 +1,27 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import AdBanner from '@/components/AdBanner'
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const code = searchParams.get('code')
+
+  useEffect(() => {
+    if (code) {
+      window.location.href = `/api/auth/callback?code=${encodeURIComponent(code)}`
+    }
+  }, [code])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -42,6 +52,14 @@ export default function LoginPage() {
         queryParams: { access_type: 'offline', prompt: 'consent' },
       },
     })
+  }
+
+  if (code) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center">
+        <p className="text-slate-500">로그인 처리 중...</p>
+      </div>
+    )
   }
 
   return (
@@ -109,5 +127,17 @@ export default function LoginPage() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col min-h-screen items-center justify-center">
+        <p className="text-slate-500">로딩 중...</p>
+      </div>
+    }>
+      <LoginContent />
+    </Suspense>
   )
 }

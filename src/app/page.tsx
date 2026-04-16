@@ -1,7 +1,32 @@
+'use client'
+
+import { useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
+import { Suspense } from 'react'
 import AdBanner from '@/components/AdBanner'
 
-export default function HomePage() {
+function HomeContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    const code = searchParams.get('code')
+    if (code) {
+      // 서버 사이드에서 세션 교환이 이루어지도록 callback 라우트로 하드 리다이렉트
+      window.location.href = `/api/auth/callback?code=${encodeURIComponent(code)}`
+    }
+  }, [searchParams, router])
+
+  const code = searchParams.get('code')
+  if (code) {
+    return (
+      <div className="flex flex-col min-h-screen items-center justify-center">
+        <p className="text-slate-500">로그인 처리 중...</p>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <AdBanner />
@@ -46,5 +71,17 @@ export default function HomePage() {
         </div>
       </main>
     </div>
+  )
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col min-h-screen items-center justify-center">
+        <p className="text-slate-500">로딩 중...</p>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   )
 }
