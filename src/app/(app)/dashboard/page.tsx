@@ -152,7 +152,7 @@ export default async function DashboardPage() {
           <StatCard
             label="도전한 고유 문장"
             value={uniqueSolved}
-            sub={`현재 스트릭 ${profile?.current_streak ?? 0}`}
+            sub={`연속 정답 스트릭 ${profile?.current_streak ?? 0}개`}
           />
         </div>
       </div>
