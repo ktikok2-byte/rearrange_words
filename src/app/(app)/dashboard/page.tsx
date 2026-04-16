@@ -59,11 +59,7 @@ export default async function DashboardPage() {
   const tenWeekly = slice(tenWeeksAgo)
   const yearly    = slice(yearAgo)
 
-  // ── 문제 현황 (attempts 기준 — 전체 성과·기간별 성과와 동일 소스) ──
-  const correctCount = totalCorrect
-  const wrongCount   = totalWrong
-
-  // 고유 문장 수는 별도 표시용
+  // ── 고유 문장 수 (user_sentence_status 기준) ──────────────────────
   const { data: statusCounts } = await supabase
     .from('user_sentence_status')
     .select('status')
@@ -106,9 +102,8 @@ export default async function DashboardPage() {
             <div className="text-sm opacity-80 mt-1">{minWords}~{maxWords}단어 문장</div>
           </div>
           <div className="text-right text-sm opacity-80 space-y-1">
-            <div>연속 정답: <span className="font-bold text-white">{profile?.consecutive_correct}/2</span></div>
-            <div>연속 오답: <span className="font-bold text-white">{profile?.consecutive_wrong}/2</span></div>
-            <div>최고 연속: <span className="font-bold text-white">{profile?.longest_streak}</span></div>
+            <div>레벨업까지: <span className="font-bold text-white">{profile?.consecutive_correct}/2 정답</span></div>
+            <div>레벨다운까지: <span className="font-bold text-white">{profile?.consecutive_wrong}/2 오답</span></div>
           </div>
         </div>
         <div className="flex gap-2 text-xs opacity-70">
@@ -118,42 +113,26 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Overall Stats — attempts 테이블 기준, 기간별 성과와 동일 소스 */}
+      {/* 전체 성과 + 문제 현황 통합 (안풀었던 문제 모드 기준) */}
       <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-1">전체 성과</h3>
-        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 전체 기간 · 중복 시도 포함</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="총 시도" value={totalSolved} />
-          <StatCard label="정답" value={totalCorrect} />
-          <StatCard label="오답" value={totalWrong} />
-          <StatCard label="정답률" value={`${accuracy}%`} />
-        </div>
-      </div>
-
-      {/* Period Stats */}
-      <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-1">기간별 성과</h3>
-        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 중복 시도 포함 · UTC 기준</p>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="오늘" value={daily.total}     sub={`정답 ${daily.correct}개`} />
-          <StatCard label="1주일" value={weekly.total}    sub={`정답 ${weekly.correct}개`} />
-          <StatCard label="10주" value={tenWeekly.total} sub={`정답 ${tenWeekly.correct}개`} />
-          <StatCard label="1년" value={yearly.total}     sub={`정답 ${yearly.correct}개`} />
-        </div>
-      </div>
-
-      {/* Sentence Status — attempts 기준(전체 성과와 동일) + 고유 문장 수 */}
-      <div>
-        <h3 className="text-lg font-bold text-slate-700 mb-1">문제 현황</h3>
-        <p className="text-xs text-slate-400 mb-3">안풀었던 문제 모드 · 전체 기간 · 전체 성과와 동일 기준</p>
+        <h3 className="text-lg font-bold text-slate-700 mb-3">전체 성과 <span className="text-sm font-normal text-slate-400">안풀었던 문제 모드 · 전체 기간</span></h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <StatCard label="정답 횟수" value={correctCount} />
-          <StatCard label="오답 횟수" value={wrongCount} />
-          <StatCard
-            label="도전한 고유 문장"
-            value={uniqueSolved}
-            sub={`연속 정답 스트릭 ${profile?.current_streak ?? 0}개`}
-          />
+          <StatCard label="도전한 고유 문장" value={uniqueSolved} />
+          <StatCard label="총 시도 횟수" value={totalSolved} sub={uniqueSolved !== totalSolved ? `고유 문장보다 ${totalSolved - uniqueSolved}회 더 많음` : undefined} />
+          <StatCard label="정답률" value={`${accuracy}%`} sub={`정답 ${totalCorrect} / 오답 ${totalWrong}`} />
+          <StatCard label="현재 스트릭" value={`${profile?.current_streak ?? 0}연속`} sub="오답 시 초기화" />
+          <StatCard label="최고 스트릭" value={`${profile?.longest_streak ?? 0}연속`} sub="역대 최고 연속 정답" />
+        </div>
+      </div>
+
+      {/* 기간별 성과 */}
+      <div>
+        <h3 className="text-lg font-bold text-slate-700 mb-3">기간별 성과 <span className="text-sm font-normal text-slate-400">안풀었던 문제 모드</span></h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatCard label="오늘"  value={daily.total}     sub={`정답 ${daily.correct} / 오답 ${daily.total - daily.correct}`} />
+          <StatCard label="1주일" value={weekly.total}    sub={`정답 ${weekly.correct} / 오답 ${weekly.total - weekly.correct}`} />
+          <StatCard label="10주"  value={tenWeekly.total} sub={`정답 ${tenWeekly.correct} / 오답 ${tenWeekly.total - tenWeekly.correct}`} />
+          <StatCard label="1년"   value={yearly.total}    sub={`정답 ${yearly.correct} / 오답 ${yearly.total - yearly.correct}`} />
         </div>
       </div>
 
