@@ -29,6 +29,21 @@ const REVIEW_MODES: { mode: GameMode; label: string; category: ReviewCategory }[
   { mode: 'review_old', label: '1년 이상 후 맞힌 문제', category: 'old' },
 ]
 
+// Supabase server-side max_rows defaults to 1000; paginate to get all sentences
+async function fetchAllSentences(supabase: ReturnType<typeof createClient>): Promise<Sentence[]> {
+  const PAGE = 1000
+  let all: Sentence[] = []
+  let from = 0
+  while (true) {
+    const { data } = await supabase.from('sentences').select('*').order('id').range(from, from + PAGE - 1)
+    if (!data || data.length === 0) break
+    all = [...all, ...data]
+    if (data.length < PAGE) break
+    from += PAGE
+  }
+  return all
+}
+
 export default function GameClient({ userId, initialProfile }: Props) {
   const supabase   = createClient()
   const { settings } = useSettings()
@@ -69,8 +84,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
   // ── Data loading ──────────────────────────────────────────
   useEffect(() => {
     async function load() {
-      const { data: sents } = await supabase.from('sentences').select('*').order('id').limit(99999)
-      setSentences(sents ?? [])
+      const sents = await fetchAllSentences(supabase)
+      setSentences(sents)
 
       const { data: statuses } = await supabase
         .from('user_sentence_status')
@@ -159,8 +174,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
         setPhase('refilling')
         const added = await triggerRefill(profile.current_level)
         if (added) {
-          const { data: sents } = await supabase.from('sentences').select('*').order('id').limit(99999)
-          const newSents = sents ?? []
+          const newSents = await fetchAllSentences(supabase)
           setSentences(newSents)
           const result2 = findNextUnsolvedSentence(
             newSents, userStatuses, reviewCategories, profile.current_level, true
@@ -365,10 +379,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ── Mode select ───────────────────────────────────────────
   if (phase === 'mode-select') {
-    const wrongCount   = Object.values(userStatuses).filter(s => s === 'wrong').length
-    const correctCount = Object.values(userStatuses).filter(s => s === 'correct').length
-    // Total unsolved across ALL levels (badge: how many sentences left to solve overall)
-    const unsolvedCount = sentences.filter(s => (userStatuses[s.id] ?? 'unsolved') === 'unsolved').length
+    const wrongCount    = Object.values(userStatuses).filter(s => s === 'wrong').length
+    const correctCount  = Object.values(userStatuses).filter(s => s === 'correct').length
+    // Unsolved at current level (matches what the mode actually serves)
+    const unsolvedCount = filterSentencesByMode(sentences, userStatuses, reviewCategories, 'unsolved', profile.current_level).length
 
     const reviewCounts: Record<string, number> = {}
     for (const [idStr, status] of Object.entries(userStatuses)) {
