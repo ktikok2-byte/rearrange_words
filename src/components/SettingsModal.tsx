@@ -118,6 +118,31 @@ export default function SettingsModal({ onClose }: Props) {
               checked={settings.useStartButton}
               onChange={v => updateSetting('useStartButton', v)}
             />
+            <div className="border-t border-slate-100" />
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <div className="font-medium text-slate-800 text-sm">단어당 타이머</div>
+                  <div className="text-xs text-slate-500 mt-0.5">단어 1개당 주어지는 시간입니다.</div>
+                </div>
+                <span className="text-sm font-bold text-blue-600 min-w-[3rem] text-right">
+                  {settings.secondsPerWord.toFixed(1)}초
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.5}
+                max={5.0}
+                step={0.1}
+                value={settings.secondsPerWord}
+                onChange={e => updateSetting('secondsPerWord', parseFloat(e.target.value))}
+                className="w-full accent-blue-600"
+              />
+              <div className="flex justify-between text-xs text-slate-400 mt-0.5">
+                <span>0.5초</span>
+                <span>5.0초</span>
+              </div>
+            </div>
           </div>
         )}
 

@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { GameMode, Profile, ReviewCategory, Sentence, LANGUAGE_NAMES } from '@/types'
 import {
-  shuffleArray, tokenize, calcTimerSeconds, checkAnswer,
+  shuffleArray, tokenize, checkAnswer,
   filterSentencesByMode, calcNewProfile, nextSentenceStatus,
   computeReviewCategory, findNextUnsolvedSentence,
 } from '@/lib/game'
@@ -141,7 +141,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setAnswerEntries([])
     setUsedIndices(new Set())
     submittingRef.current = false
-    const secs = calcTimerSeconds(words.length)
+    const secs = Math.round(words.length * settings.secondsPerWord * 10) / 10
     setTimerSeconds(secs)
 
     const useStart = settings.useStartButton
@@ -595,25 +595,26 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
-            {/* Answer area: words shift when removed (no ghost) */}
-            <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-              ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
-              {answerEntries.length === 0 && (
-                <span className="text-slate-300 text-sm self-center w-full text-center">
-                  아래 단어를 순서대로 클릭하세요
-                </span>
-              )}
-              {answerEntries.map((e, i) => (
-                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
-              ))}
-            </div>
-
-            {/* Source area: used words become invisible but keep their position so others don't shift */}
+            {/* Source area: always on top so it never shifts when answer area grows below it.
+                Used words become invisible but keep their slot so remaining words don't reflow. */}
             <div className="flex flex-wrap gap-2">
               {shuffledWords.map((word, i) => (
                 <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
                   <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
                 </div>
+              ))}
+            </div>
+
+            {/* Answer area: below source, so it can grow downward without affecting source position */}
+            <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
+              ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
+              {answerEntries.length === 0 && (
+                <span className="text-slate-300 text-sm self-center w-full text-center">
+                  위 단어를 순서대로 클릭하세요
+                </span>
+              )}
+              {answerEntries.map((e, i) => (
+                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
               ))}
             </div>
 

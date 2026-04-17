@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react'
 
 export interface Settings {
-  showTranslation: boolean
-  useStartButton:  boolean
+  showTranslation:  boolean
+  useStartButton:   boolean
+  secondsPerWord:   number   // timer seconds allocated per word
 }
 
 const DEFAULTS: Settings = {
   showTranslation: true,
   useStartButton:  true,
+  secondsPerWord:  2.0,
 }
 
 const KEY = 'wordorder_settings'
