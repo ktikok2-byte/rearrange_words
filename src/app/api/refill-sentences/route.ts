@@ -4,7 +4,7 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 
 const REFILL_PER_LEVEL = 200   // 한 번에 추가할 문장 수
-const NOTIFY_EMAIL = 'ktikok@gmail.com'
+const NOTIFY_EMAIL = 'ktikok2@gmail.com'
 
 interface PoolSentence {
   ko: string

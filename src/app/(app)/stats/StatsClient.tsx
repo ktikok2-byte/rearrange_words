@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   LineChart, Line, CartesianGrid, Legend
 } from 'recharts'
+import { LevelHistoryRow } from '@/types'
 
 type Period = 'all' | 'year' | '10week' | 'week' | 'day'
 
@@ -24,7 +25,7 @@ interface DayData {
 function groupByDay(rows: SolvedRow[]): DayData[] {
   const map = new Map<string, { total: number; correct: number; wrong: number }>()
   for (const r of rows) {
-    const d = r.solved_at.slice(0, 10)
+    const d   = r.solved_at.slice(0, 10)
     const cur = map.get(d) ?? { total: 0, correct: 0, wrong: 0 }
     cur.total++
     if (r.unsolved_correct) cur.correct++; else cur.wrong++
@@ -42,11 +43,11 @@ function groupByDay(rows: SolvedRow[]): DayData[] {
 function filterByPeriod(rows: SolvedRow[], period: Period): SolvedRow[] {
   const now = new Date()
   const since: Record<Period, Date> = {
-    all:     new Date(0),
-    year:    new Date(new Date().setUTCFullYear(now.getUTCFullYear() - 1)),
+    all:      new Date(0),
+    year:     new Date(new Date().setUTCFullYear(now.getUTCFullYear() - 1)),
     '10week': new Date(new Date().setUTCDate(now.getUTCDate() - 70)),
-    week:    new Date(new Date().setUTCDate(now.getUTCDate() - 7)),
-    day:     (() => { const d = new Date(now.toISOString().slice(0,10) + 'T00:00:00Z'); return d })(),
+    week:     new Date(new Date().setUTCDate(now.getUTCDate() - 7)),
+    day:      (() => { const d = new Date(now.toISOString().slice(0, 10) + 'T00:00:00Z'); return d })(),
   }
   return rows.filter(r => new Date(r.solved_at) >= since[period])
 }
@@ -55,7 +56,12 @@ const PERIOD_LABELS: Record<Period, string> = {
   all: '전체', year: '1년', '10week': '10주', week: '1주', day: '오늘'
 }
 
-export default function StatsClient({ rows }: { rows: SolvedRow[] }) {
+interface Props {
+  rows: SolvedRow[]
+  levelHistory: LevelHistoryRow[]
+}
+
+export default function StatsClient({ rows, levelHistory }: Props) {
   const [period, setPeriod] = useState<Period>('week')
 
   const filtered = useMemo(() => filterByPeriod(rows, period), [rows, period])
@@ -65,6 +71,11 @@ export default function StatsClient({ rows }: { rows: SolvedRow[] }) {
   const correct  = filtered.filter(r => r.unsolved_correct).length
   const wrong    = total - correct
   const accuracy = total ? Math.round((correct / total) * 100) : 0
+
+  const levelData = useMemo(() => levelHistory.map(r => ({
+    date:  r.changed_at.slice(0, 10),
+    level: r.to_level,
+  })), [levelHistory])
 
   return (
     <div className="space-y-6">
@@ -88,9 +99,9 @@ export default function StatsClient({ rows }: { rows: SolvedRow[] }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: '풀어본 문장', value: total },
-          { label: '정답', value: correct },
-          { label: '오답', value: wrong },
-          { label: '정답률', value: `${accuracy}%` },
+          { label: '정답',       value: correct },
+          { label: '오답',       value: wrong },
+          { label: '정답률',     value: `${accuracy}%` },
         ].map(({ label, value }) => (
           <div key={label} className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 text-center">
             <div className="text-2xl font-extrabold text-slate-800">{value}</div>
@@ -119,7 +130,7 @@ export default function StatsClient({ rows }: { rows: SolvedRow[] }) {
                 />
                 <Legend formatter={v => v === 'correct' ? '정답' : '오답'} />
                 <Bar dataKey="correct" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="wrong" fill="#fca5a5" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="wrong"   fill="#fca5a5" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -149,6 +160,37 @@ export default function StatsClient({ rows }: { rows: SolvedRow[] }) {
             </ResponsiveContainer>
           </div>
         </>
+      )}
+
+      {/* Level history graph */}
+      {levelData.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+          <h3 className="text-base font-bold text-slate-700 mb-4">레벨 변화 추이</h3>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={levelData} margin={{ top: 4, right: 10, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                tickFormatter={v => `Lv.${v}`}
+              />
+              <Tooltip
+                contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: 12 }}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                formatter={(v: any) => [`Lv.${v}`, '레벨']}
+              />
+              <Line
+                type="stepAfter"
+                dataKey="level"
+                stroke="#a855f7"
+                strokeWidth={2}
+                dot={{ fill: '#a855f7', r: 4 }}
+                activeDot={{ r: 6 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       )}
     </div>
   )

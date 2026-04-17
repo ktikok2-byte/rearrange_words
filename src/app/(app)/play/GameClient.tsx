@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { GameMode, Profile, Sentence, LANGUAGE_NAMES } from '@/types'
+import { GameMode, Profile, ReviewCategory, Sentence, LANGUAGE_NAMES } from '@/types'
 import {
   shuffleArray, tokenize, calcTimerSeconds, checkAnswer,
-  filterSentencesByMode, calcNewProfile, nextSentenceStatus
+  filterSentencesByMode, calcNewProfile, nextSentenceStatus,
+  computeReviewCategory, findNextUnsolvedSentence,
 } from '@/lib/game'
 import GameTimer from '@/components/GameTimer'
 import WordCard from '@/components/WordCard'
+import { useSettings } from '@/hooks/useSettings'
 
 type Phase = 'mode-select' | 'playing' | 'result' | 'refilling' | 'all-done'
 
@@ -18,80 +20,91 @@ interface Props {
   initialProfile: Profile
 }
 
+// Spaced repetition mode metadata
+const REVIEW_MODES: { mode: GameMode; label: string; category: ReviewCategory }[] = [
+  { mode: 'review_24h', label: '24시간 이내 맞힌 문제', category: '24h' },
+  { mode: 'review_1w',  label: '24시간~1주일 맞힌 문제', category: '1w'  },
+  { mode: 'review_3m',  label: '1주일~3개월 맞힌 문제', category: '3m'  },
+  { mode: 'review_1y',  label: '3개월~1년 맞힌 문제',   category: '1y'  },
+  { mode: 'review_old', label: '1년 이상 후 맞힌 문제', category: 'old' },
+]
+
 export default function GameClient({ userId, initialProfile }: Props) {
-  const supabase = createClient()
+  const supabase   = createClient()
+  const { settings } = useSettings()
 
-  const [profile, setProfile] = useState<Profile>(initialProfile)
-  const [mode, setMode] = useState<GameMode>('unsolved')
-  const [phase, setPhase] = useState<Phase>('mode-select')
+  const [profile, setProfile]       = useState<Profile>(initialProfile)
+  const [mode, setMode]             = useState<GameMode>('unsolved')
+  const [phase, setPhase]           = useState<Phase>('mode-select')
 
-  const [sentences, setSentences] = useState<Sentence[]>([])
-  const [userStatuses, setUserStatuses] = useState<Record<number, string>>({})
-  const [currentSentence, setCurrentSentence] = useState<Sentence | null>(null)
-  const [shuffledWords, setShuffledWords] = useState<string[]>([])
-  const [answerWords, setAnswerWords] = useState<string[]>([])
-  const [usedIndices, setUsedIndices] = useState<Set<number>>(new Set())
+  const [sentences, setSentences]           = useState<Sentence[]>([])
+  const [userStatuses, setUserStatuses]     = useState<Record<number, string>>({})
+  const [reviewCategories, setReviewCategories] = useState<Record<number, string>>({})
+  const [currentSentence, setCurrentSentence]   = useState<Sentence | null>(null)
+  const [shuffledWords, setShuffledWords]       = useState<string[]>([])
+  // answerSlots: null = empty (word removed), string = placed word
+  const [answerSlots, setAnswerSlots]           = useState<(string | null)[]>([])
+  const [usedIndices, setUsedIndices]           = useState<Set<number>>(new Set())
 
   const [timerSeconds, setTimerSeconds] = useState(3)
-  const [timerPaused, setTimerPaused] = useState(false)
-  const [startTime, setStartTime] = useState<Date | null>(null)
+  const [timerPaused, setTimerPaused]   = useState(false)
+  const [startTime, setStartTime]       = useState<Date | null>(null)
 
   const [lastResult, setLastResult] = useState<{
     isCorrect: boolean
     timeTakenMs: number | null
+    timerSeconds: number
     correctAnswer: string
     nativeTranslation: string
   } | null>(null)
 
-  const [shake, setShake] = useState(false)
+  const [shake, setShake]         = useState(false)
   const [levelUpMsg, setLevelUpMsg] = useState<string | null>(null)
+  const [ready, setReady]         = useState(false)
 
-  // Load sentences + user statuses once
+  // Track direction of last level change for bidirectional skip
+  const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
+
+  // ── Data loading ──────────────────────────────────────────
   useEffect(() => {
     async function load() {
       const { data: sents } = await supabase.from('sentences').select('*').order('id')
       setSentences(sents ?? [])
+
       const { data: statuses } = await supabase
-        .from('user_sentence_status').select('sentence_id, status').eq('user_id', userId)
-      const map: Record<number, string> = {}
-      statuses?.forEach(s => { map[s.sentence_id] = s.status })
-      setUserStatuses(map)
+        .from('user_sentence_status')
+        .select('sentence_id, status, review_category')
+        .eq('user_id', userId)
+
+      const statusMap: Record<number, string> = {}
+      const categoryMap: Record<number, string> = {}
+      statuses?.forEach(s => {
+        statusMap[s.sentence_id] = s.status
+        if (s.review_category) categoryMap[s.sentence_id] = s.review_category
+      })
+      setUserStatuses(statusMap)
+      setReviewCategories(categoryMap)
     }
     load()
   }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // unsolved 모드에서 현재 레벨부터 위로 탐색, 없으면 null 반환
-  const findNextSentenceAndLevel = useCallback((
-    allSentences: Sentence[],
-    statuses: Record<number, string>,
-    startLevel: number
-  ): { sentence: Sentence; level: number } | null => {
-    const maxLevel = allSentences.reduce((m, s) => Math.max(m, s.difficulty_level), 0)
-
-    for (let lvl = startLevel; lvl <= maxLevel; lvl++) {
-      const pool = filterSentencesByMode(allSentences, statuses, 'unsolved', lvl)
-      if (pool.length > 0) {
-        return { sentence: pool[Math.floor(Math.random() * pool.length)], level: lvl }
-      }
-    }
-    return null
-  }, [])
-
+  // ── Sentence picking ──────────────────────────────────────
   const pickNextSentence = useCallback((
     allSentences: Sentence[],
     statuses: Record<number, string>,
+    categories: Record<number, string>,
     currentMode: GameMode,
     currentLevel: number
   ): Sentence | null => {
-    const pool = filterSentencesByMode(allSentences, statuses, currentMode, currentLevel)
+    const pool = filterSentencesByMode(allSentences, statuses, categories, currentMode, currentLevel)
     if (pool.length === 0) return null
     return pool[Math.floor(Math.random() * pool.length)]
   }, [])
 
-  // 레벨 소진 → API 호출로 문장 자동 추가
+  // ── Refill sentences API ──────────────────────────────────
   const triggerRefill = useCallback(async (level: number): Promise<boolean> => {
     try {
-      const res = await fetch('/api/refill-sentences', {
+      const res  = await fetch('/api/refill-sentences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ level, userId, username: profile.username }),
@@ -103,69 +116,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
   }, [userId, profile.username])
 
-  const startGame = useCallback(async (selectedMode: GameMode) => {
-    setMode(selectedMode)
-    setLevelUpMsg(null)
-
-    if (selectedMode === 'unsolved') {
-      const result = findNextSentenceAndLevel(sentences, userStatuses, profile.current_level)
-
-      if (!result) {
-        // 전체 소진 → 자동 추가 시도
-        setPhase('refilling')
-        const added = await triggerRefill(profile.current_level)
-
-        if (added) {
-          // 새 문장 로드 후 재시도
-          const { data: sents } = await supabase.from('sentences').select('*').order('id')
-          const newSents = sents ?? []
-          setSentences(newSents)
-          const result2 = findNextSentenceAndLevel(newSents, userStatuses, profile.current_level)
-          if (result2) {
-            launchSentence(result2.sentence, result2.level, selectedMode)
-            return
-          }
-        }
-
-        setPhase('all-done')
-        return
-      }
-
-      // 레벨이 자동으로 올라간 경우 안내
-      if (result.level > profile.current_level) {
-        setLevelUpMsg(`Lv.${profile.current_level} 문장을 모두 풀었어요! Lv.${result.level}로 이동합니다.`)
-        // 레벨 소진 감지 → 자동 추가 트리거 (백그라운드)
-        triggerRefill(profile.current_level)
-        // DB 레벨 업데이트
-        const newProfileData = { current_level: result.level, consecutive_correct: 0, consecutive_wrong: 0 }
-        await supabase.from('profiles').update(newProfileData).eq('id', userId)
-        setProfile(prev => ({ ...prev, ...newProfileData }))
-      }
-
-      launchSentence(result.sentence, result.level, selectedMode)
-    } else {
-      const sentence = pickNextSentence(sentences, userStatuses, selectedMode, profile.current_level)
-      if (!sentence) {
-        setPhase('mode-select')
-        return
-      }
-      launchSentence(sentence, profile.current_level, selectedMode)
-    }
-  }, [sentences, userStatuses, profile, userId, findNextSentenceAndLevel, pickNextSentence, triggerRefill, supabase])
-
-  const [ready, setReady] = useState(false)
-
-  const launchSentence = (sentence: Sentence, level: number, selectedMode: GameMode) => {
-    const words = tokenize(sentence.target_text)
+  // ── Launch sentence ───────────────────────────────────────
+  const launchSentence = (sentence: Sentence, _level: number, _selectedMode: GameMode) => {
+    const words   = tokenize(sentence.target_text)
     const shuffled = shuffleArray(words)
     setCurrentSentence(sentence)
     setShuffledWords(shuffled)
-    setAnswerWords([])
+    setAnswerSlots([])
     setUsedIndices(new Set())
-    setTimerSeconds(calcTimerSeconds(words.length))
-    setTimerPaused(true)  // wait for start button
-    setReady(true)
-    setStartTime(null)
+    const secs = calcTimerSeconds(words.length)
+    setTimerSeconds(secs)
+
+    const useStart = settings.useStartButton
+    setTimerPaused(useStart)
+    setReady(useStart)
+    setStartTime(useStart ? null : new Date())
     setLastResult(null)
     setPhase('playing')
   }
@@ -176,20 +141,81 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setStartTime(new Date())
   }
 
+  // ── Start game ────────────────────────────────────────────
+  const startGame = useCallback(async (selectedMode: GameMode) => {
+    setMode(selectedMode)
+    setLevelUpMsg(null)
+
+    if (selectedMode === 'unsolved') {
+      const preferUp = lastLevelChangeRef.current !== 'down'
+      lastLevelChangeRef.current = null
+      const result = findNextUnsolvedSentence(
+        sentences, userStatuses, reviewCategories, profile.current_level, preferUp
+      )
+
+      if (!result) {
+        setPhase('refilling')
+        const added = await triggerRefill(profile.current_level)
+        if (added) {
+          const { data: sents } = await supabase.from('sentences').select('*').order('id')
+          const newSents = sents ?? []
+          setSentences(newSents)
+          const result2 = findNextUnsolvedSentence(
+            newSents, userStatuses, reviewCategories, profile.current_level, true
+          )
+          if (result2) { launchSentence(result2.sentence, result2.level, selectedMode); return }
+        }
+        setPhase('all-done')
+        return
+      }
+
+      // Auto level-up when skipping ahead
+      if (result.level !== profile.current_level) {
+        const dir = result.level > profile.current_level ? '위' : '아래'
+        setLevelUpMsg(`Lv.${profile.current_level}에 풀 문장이 없어 Lv.${result.level}로 이동합니다.`)
+        if (result.level > profile.current_level) triggerRefill(profile.current_level)
+        const newProfileData = { current_level: result.level, consecutive_correct: 0, consecutive_wrong: 0 }
+        await supabase.from('profiles').update(newProfileData).eq('id', userId)
+        // Record level history
+        await supabase.from('level_history').insert({
+          user_id: userId,
+          from_level: profile.current_level,
+          to_level: result.level,
+          reason: 'level_exhausted',
+          changed_at: new Date().toISOString(),
+        })
+        setProfile(prev => ({ ...prev, ...newProfileData }))
+        void dir
+      }
+
+      launchSentence(result.sentence, result.level, selectedMode)
+    } else {
+      const sentence = pickNextSentence(
+        sentences, userStatuses, reviewCategories, selectedMode, profile.current_level
+      )
+      if (!sentence) { setPhase('mode-select'); return }
+      launchSentence(sentence, profile.current_level, selectedMode)
+    }
+  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
     if (usedIndices.has(index)) return
     const newUsed = new Set(usedIndices)
     newUsed.add(index)
     setUsedIndices(newUsed)
-    const newAnswer = [...answerWords, word]
-    setAnswerWords(newAnswer)
-    if (newAnswer.length === shuffledWords.length) submitAnswer(newAnswer)
+    const newSlots = [...answerSlots, word]
+    setAnswerSlots(newSlots)
+    const actual = newSlots.filter((w): w is string => w !== null)
+    if (actual.length === shuffledWords.length) submitAnswer(actual)
   }
 
   const handleAnswerClick = (idx: number) => {
-    const word = answerWords[idx]
-    const newAnswer = answerWords.filter((_, i) => i !== idx)
-    setAnswerWords(newAnswer)
+    const word = answerSlots[idx]
+    if (word === null) return
+    const newSlots = [...answerSlots]
+    newSlots[idx] = null
+    setAnswerSlots(newSlots)
     const newUsed = new Set(usedIndices)
     for (const i of Array.from(newUsed)) {
       if (shuffledWords[i] === word) { newUsed.delete(i); break }
@@ -197,29 +223,41 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setUsedIndices(newUsed)
   }
 
+  // ── Submit answer ─────────────────────────────────────────
   const submitAnswer = useCallback(async (answer: string[]) => {
     if (!currentSentence || !startTime) return
     setTimerPaused(true)
 
     const correctWords = tokenize(currentSentence.target_text)
-    const isCorrect = checkAnswer(answer, correctWords)
-    const now = new Date()
-    const timeTakenMs = isCorrect ? now.getTime() - startTime.getTime() : null
+    const isCorrect    = checkAnswer(answer, correctWords)
+    const now          = new Date()
+    const timeTakenMs  = now.getTime() - startTime.getTime()
 
     if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
 
+    const prevStatus   = userStatuses[currentSentence.id] ?? 'unsolved'
+    const newStatus    = nextSentenceStatus(prevStatus, mode, isCorrect)
     const newProfileData = mode === 'unsolved' ? calcNewProfile(profile, isCorrect) : {}
 
-    // attempts 테이블 제거 — user_sentence_status 단일 소스로 통합
-    const newStatus = nextSentenceStatus(userStatuses[currentSentence.id] ?? 'unsolved', mode, isCorrect)
+    // Fetch existing row (need last_wrong_at for review_category)
     const { data: existing } = await supabase
-      .from('user_sentence_status').select('id, attempt_count, solved_at')
+      .from('user_sentence_status')
+      .select('id, attempt_count, solved_at, last_wrong_at')
       .eq('user_id', userId).eq('sentence_id', currentSentence.id).single()
 
-    // unsolved 모드에서 첫 풀이: solved_at, unsolved_correct 고정 기록
+    // unsolved mode: record first solve
     const unsolvedFields = (mode === 'unsolved' && !existing?.solved_at)
       ? { solved_at: now.toISOString(), unsolved_correct: isCorrect }
       : {}
+
+    // Spaced repetition fields
+    let reviewFields: Record<string, unknown> = {}
+    if (!isCorrect) {
+      reviewFields = { last_wrong_at: now.toISOString(), review_category: null }
+    } else if (prevStatus === 'wrong' && existing?.last_wrong_at) {
+      const cat = computeReviewCategory(new Date(existing.last_wrong_at), now)
+      reviewFields = { review_category: cat }
+    }
 
     if (existing) {
       await supabase.from('user_sentence_status').update({
@@ -227,6 +265,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
         last_attempted_at: now.toISOString(),
         attempt_count: existing.attempt_count + 1,
         ...unsolvedFields,
+        ...reviewFields,
       }).eq('id', existing.id)
     } else {
       await supabase.from('user_sentence_status').insert({
@@ -236,31 +275,58 @@ export default function GameClient({ userId, initialProfile }: Props) {
         last_attempted_at: now.toISOString(),
         attempt_count: 1,
         ...unsolvedFields,
+        ...reviewFields,
       })
     }
 
+    // Update in-memory status
     setUserStatuses(prev => ({ ...prev, [currentSentence.id]: newStatus }))
 
+    // Update in-memory review category
+    if ('review_category' in reviewFields) {
+      const cat = reviewFields.review_category as string | null
+      setReviewCategories(prev => {
+        const next = { ...prev }
+        if (cat) next[currentSentence.id] = cat
+        else delete next[currentSentence.id]
+        return next
+      })
+    }
+
+    // Profile update + level history (unsolved mode only)
     if (mode === 'unsolved' && Object.keys(newProfileData).length > 0) {
+      // Track level change direction
+      if (typeof newProfileData.current_level === 'number' &&
+          newProfileData.current_level !== profile.current_level) {
+        lastLevelChangeRef.current = newProfileData.current_level > profile.current_level ? 'up' : 'down'
+        await supabase.from('level_history').insert({
+          user_id:    userId,
+          from_level: profile.current_level,
+          to_level:   newProfileData.current_level,
+          reason:     isCorrect ? 'correct_streak' : 'wrong_streak',
+          changed_at: now.toISOString(),
+        })
+      }
       await supabase.from('profiles').update(newProfileData).eq('id', userId)
       setProfile(prev => ({ ...prev, ...newProfileData }))
     }
 
     setLastResult({
-      isCorrect, timeTakenMs,
-      correctAnswer: currentSentence.target_text,
+      isCorrect,
+      timeTakenMs: isCorrect ? timeTakenMs : null,
+      timerSeconds,
+      correctAnswer:     currentSentence.target_text,
       nativeTranslation: currentSentence.source_text,
     })
     setPhase('result')
-  }, [currentSentence, startTime, mode, profile, userId, userStatuses, supabase])
+  }, [currentSentence, startTime, mode, profile, userId, userStatuses, timerSeconds, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTimerExpire = useCallback(() => {
-    submitAnswer(answerWords)
-  }, [answerWords, submitAnswer])
+    submitAnswer(answerSlots.filter((w): w is string => w !== null))
+  }, [answerSlots, submitAnswer])
 
   // ===== RENDER =====
 
-  // 문장 자동 추가 중
   if (phase === 'refilling') {
     return (
       <div className="max-w-lg mx-auto text-center py-20 space-y-4">
@@ -271,7 +337,6 @@ export default function GameClient({ userId, initialProfile }: Props) {
     )
   }
 
-  // 완전 소진
   if (phase === 'all-done') {
     return (
       <div className="max-w-lg mx-auto text-center py-16 space-y-6 bounce-in">
@@ -287,14 +352,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
           <button
             onClick={() => setPhase('mode-select')}
-            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors"
-          >
+            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors">
             다른 모드로 계속하기
           </button>
           <Link
             href="/dashboard"
-            className="px-6 py-3 bg-white text-slate-700 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
-          >
+            className="px-6 py-3 bg-white text-slate-700 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
             홈으로
           </Link>
         </div>
@@ -302,17 +365,31 @@ export default function GameClient({ userId, initialProfile }: Props) {
     )
   }
 
+  // ── Mode select ───────────────────────────────────────────
   if (phase === 'mode-select') {
     const wrongCount   = Object.values(userStatuses).filter(s => s === 'wrong').length
     const correctCount = Object.values(userStatuses).filter(s => s === 'correct').length
-    const unsolvedCount = filterSentencesByMode(sentences, userStatuses, 'unsolved', profile.current_level).length
-    const allCount = sentences.length
+    // Total unsolved across ALL levels (badge: how many sentences left to solve overall)
+    const unsolvedCount = sentences.filter(s => (userStatuses[s.id] ?? 'unsolved') === 'unsolved').length
+
+    const reviewCounts: Record<string, number> = {}
+    for (const [idStr, status] of Object.entries(userStatuses)) {
+      if (status === 'correct') {
+        const cat = reviewCategories[Number(idStr)]
+        if (cat) reviewCounts[cat] = (reviewCounts[cat] ?? 0) + 1
+      }
+    }
 
     const counts: Record<GameMode, number> = {
-      unsolved: unsolvedCount,
-      wrong:    wrongCount,
-      correct:  correctCount,
-      all:      allCount,
+      unsolved:   unsolvedCount,
+      wrong:      wrongCount,
+      correct:    correctCount,
+      all:        sentences.length,
+      review_24h: reviewCounts['24h'] ?? 0,
+      review_1w:  reviewCounts['1w']  ?? 0,
+      review_3m:  reviewCounts['3m']  ?? 0,
+      review_1y:  reviewCounts['1y']  ?? 0,
+      review_old: reviewCounts['old'] ?? 0,
     }
 
     return (
@@ -323,26 +400,27 @@ export default function GameClient({ userId, initialProfile }: Props) {
           {' '}({profile.current_level + 1}~{profile.current_level + 3}단어)
         </p>
 
+        {/* Main modes */}
         <div className="space-y-3">
           {([
-            { mode: 'unsolved' as GameMode, label: '안 풀었던 문제', desc: '새로운 문제를 풀어요. 레벨 시스템이 적용됩니다.', color: 'blue' },
-            { mode: 'wrong' as GameMode, label: '틀린 문제 다시 풀기', desc: '이전에 틀렸던 문제를 다시 연습해요.', color: 'red' },
-            { mode: 'correct' as GameMode, label: '맞은 문제 복습', desc: '이미 맞춘 문제를 복습해요.', color: 'green' },
-            { mode: 'all' as GameMode, label: '전체 문제 풀기', desc: '모든 문제를 랜덤으로 풀어요.', color: 'slate' },
+            { mode: 'unsolved' as GameMode, label: '안 풀었던 문제',    desc: '새로운 문제. 레벨 시스템 적용.',                color: 'blue'  },
+            { mode: 'wrong'    as GameMode, label: '틀린 문제 다시 풀기', desc: '틀렸던 문제를 다시 연습해요.',                 color: 'red'   },
+            { mode: 'correct'  as GameMode, label: '맞은 문제 복습',     desc: '맞췄던 문제를 복습해요.',                     color: 'green' },
+            { mode: 'all'      as GameMode, label: '전체 문제 풀기',     desc: '모든 문제를 랜덤으로 풀어요.',                 color: 'slate' },
           ] as const).map(({ mode: m, label, desc, color }) => (
             <button key={m} onClick={() => startGame(m)}
               disabled={sentences.length === 0 || counts[m] === 0}
               className={`w-full text-left px-5 py-4 rounded-xl border-2 transition-all bg-white disabled:opacity-40
-                ${color === 'blue' ? 'border-blue-200 hover:border-blue-500 hover:bg-blue-50' : ''}
-                ${color === 'red' ? 'border-red-200 hover:border-red-500 hover:bg-red-50' : ''}
+                ${color === 'blue'  ? 'border-blue-200  hover:border-blue-500  hover:bg-blue-50'  : ''}
+                ${color === 'red'   ? 'border-red-200   hover:border-red-500   hover:bg-red-50'   : ''}
                 ${color === 'green' ? 'border-green-200 hover:border-green-500 hover:bg-green-50' : ''}
                 ${color === 'slate' ? 'border-slate-200 hover:border-slate-400 hover:bg-slate-50' : ''}`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-slate-800">{label}</span>
                 <span className={`text-sm font-bold px-2 py-0.5 rounded-full
-                  ${color === 'blue'  ? 'bg-blue-100 text-blue-600'   : ''}
-                  ${color === 'red'   ? 'bg-red-100 text-red-600'     : ''}
+                  ${color === 'blue'  ? 'bg-blue-100  text-blue-600'  : ''}
+                  ${color === 'red'   ? 'bg-red-100   text-red-600'   : ''}
                   ${color === 'green' ? 'bg-green-100 text-green-600' : ''}
                   ${color === 'slate' ? 'bg-slate-100 text-slate-600' : ''}`}>
                   {counts[m]}문장
@@ -353,6 +431,29 @@ export default function GameClient({ userId, initialProfile }: Props) {
           ))}
         </div>
 
+        {/* Spaced repetition modes */}
+        {REVIEW_MODES.some(r => counts[r.mode] > 0) && (
+          <div className="mt-6">
+            <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">스페이스드 복습</h3>
+            <div className="space-y-2">
+              {REVIEW_MODES.map(({ mode: m, label }) => (
+                <button key={m} onClick={() => startGame(m)}
+                  disabled={counts[m] === 0}
+                  className="w-full text-left px-5 py-3 rounded-xl border-2 border-purple-100 bg-white
+                    hover:border-purple-400 hover:bg-purple-50 transition-all disabled:opacity-40"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-slate-700 text-sm">{label}</span>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-600">
+                      {counts[m]}문장
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {sentences.length === 0 && (
           <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-sm">
             데이터를 불러오는 중...
@@ -362,7 +463,13 @@ export default function GameClient({ userId, initialProfile }: Props) {
     )
   }
 
+  // ── Result ────────────────────────────────────────────────
   if (phase === 'result' && lastResult) {
+    // Cap display time at timerSeconds to avoid confusion from JS timer drift
+    const displaySec = lastResult.timeTakenMs !== null
+      ? Math.min(lastResult.timeTakenMs, lastResult.timerSeconds * 1000) / 1000
+      : null
+
     return (
       <div className="max-w-lg mx-auto bounce-in">
         {levelUpMsg && (
@@ -378,9 +485,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
           <div className={`text-xl font-bold mb-1 ${lastResult.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
             {lastResult.isCorrect ? '정답!' : '오답'}
           </div>
-          {lastResult.isCorrect && lastResult.timeTakenMs && (
+          {displaySec !== null && (
             <div className="text-sm text-green-600 mb-3">
-              {(lastResult.timeTakenMs / 1000).toFixed(2)}초 만에 맞췄어요!
+              {displaySec.toFixed(2)}초 만에 맞췄어요!
             </div>
           )}
           <div className="bg-white rounded-xl p-4 border border-slate-100 space-y-2">
@@ -420,10 +527,11 @@ export default function GameClient({ userId, initialProfile }: Props) {
     )
   }
 
-  // Playing phase
+  // ── Playing ───────────────────────────────────────────────
   if (phase === 'playing' && currentSentence) {
     const correctWords = tokenize(currentSentence.target_text)
-    const langName = LANGUAGE_NAMES[currentSentence.target_language]
+    const langName     = LANGUAGE_NAMES[currentSentence.target_language]
+    const actualAnswerCount = answerSlots.filter(w => w !== null).length
 
     return (
       <div className="max-w-lg mx-auto space-y-5">
@@ -436,20 +544,32 @@ export default function GameClient({ userId, initialProfile }: Props) {
         <div className="flex items-center justify-between text-sm text-slate-500">
           <span>
             Lv.<span className="font-bold text-slate-700">{profile.current_level}</span>
-            {' '}·{' '}{mode === 'unsolved' ? '새 문제' : mode === 'wrong' ? '오답 연습' : mode === 'correct' ? '복습' : '전체'}
+            {' '}·{' '}
+            {mode === 'unsolved' ? '새 문제'
+              : mode === 'wrong'   ? '오답 연습'
+              : mode === 'correct' ? '복습'
+              : mode === 'all'     ? '전체'
+              : '스페이스드 복습'}
           </span>
           <span>{langName} · {correctWords.length}단어</span>
         </div>
 
-        <GameTimer seconds={timerSeconds} onExpire={handleTimerExpire} paused={timerPaused} />
+        {/* key=currentSentence.id resets timer on every new sentence, fixing same-word-count drift bug */}
+        <GameTimer
+          key={currentSentence.id}
+          seconds={timerSeconds}
+          onExpire={handleTimerExpire}
+          paused={timerPaused}
+        />
 
-        <div className="bg-slate-100 rounded-xl px-4 py-3 text-slate-600 text-sm">
-          <span className="text-xs text-slate-400 mr-2">{LANGUAGE_NAMES[profile.native_language]}:</span>
-          {currentSentence.source_text}
-        </div>
+        {settings.showTranslation && (
+          <div className="bg-slate-100 rounded-xl px-4 py-3 text-slate-600 text-sm">
+            <span className="text-xs text-slate-400 mr-2">{LANGUAGE_NAMES[profile.native_language]}:</span>
+            {currentSentence.source_text}
+          </div>
+        )}
 
         {ready ? (
-          /* 시작 전: 단어 가리고 시작 버튼 표시 */
           <div className="flex flex-col items-center justify-center gap-4 py-6">
             <p className="text-slate-400 text-sm">준비되면 아래 버튼을 누르세요</p>
             <button
@@ -460,16 +580,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
+            {/* Answer area: null slots show as ghost chips to keep positions fixed */}
             <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
               ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
-              {answerWords.length === 0 && (
+              {answerSlots.length === 0 && (
                 <span className="text-slate-300 text-sm self-center w-full text-center">
                   아래 단어를 순서대로 클릭하세요
                 </span>
               )}
-              {answerWords.map((word, i) => (
-                <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
-              ))}
+              {answerSlots.map((word, i) =>
+                word !== null ? (
+                  <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+                ) : (
+                  <div key={i} className="inline-flex items-center px-3 py-2 rounded-lg border-2 border-dashed border-slate-200 min-w-[2.5rem] h-[38px]" />
+                )
+              )}
             </div>
 
             <div className="flex flex-wrap gap-2">
@@ -481,12 +606,13 @@ export default function GameClient({ userId, initialProfile }: Props) {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => { setAnswerWords([]); setUsedIndices(new Set()) }}
+              <button onClick={() => { setAnswerSlots([]); setUsedIndices(new Set()) }}
                 className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                 초기화
               </button>
-              <button onClick={() => answerWords.length > 0 && submitAnswer(answerWords)}
-                disabled={answerWords.length === 0}
+              <button
+                onClick={() => actualAnswerCount > 0 && submitAnswer(answerSlots.filter((w): w is string => w !== null))}
+                disabled={actualAnswerCount === 0}
                 className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
                 제출
               </button>
@@ -496,6 +622,4 @@ export default function GameClient({ userId, initialProfile }: Props) {
       </div>
     )
   }
-
-  return <div className="text-center text-slate-400 py-20">로딩 중...</div>
 }

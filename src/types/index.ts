@@ -2,9 +2,20 @@ export type Language = 'ko' | 'en'
 
 export type LanguagePair = 'ko-en' | 'en-ko'
 
-export type GameMode = 'unsolved' | 'wrong' | 'correct' | 'all'
+export type GameMode =
+  | 'unsolved'
+  | 'wrong'
+  | 'correct'
+  | 'all'
+  | 'review_24h'
+  | 'review_1w'
+  | 'review_3m'
+  | 'review_1y'
+  | 'review_old'
 
 export type SentenceStatus = 'correct' | 'wrong' | 'unsolved'
+
+export type ReviewCategory = '24h' | '1w' | '3m' | '1y' | 'old'
 
 export interface Profile {
   id: string
@@ -57,6 +68,10 @@ export interface UserSentenceStatus {
   status: SentenceStatus
   last_attempted_at: string | null
   attempt_count: number
+  solved_at: string | null
+  unsolved_correct: boolean | null
+  last_wrong_at: string | null
+  review_category: ReviewCategory | null
 }
 
 export interface DailyStats {
@@ -71,6 +86,11 @@ export interface GameResult {
   isCorrect: boolean
   timeTakenMs: number | null
   userAnswer: string[]
+}
+
+export interface LevelHistoryRow {
+  to_level: number
+  changed_at: string
 }
 
 export const LANGUAGE_NAMES: Record<Language, string> = {
