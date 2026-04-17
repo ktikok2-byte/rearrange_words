@@ -16,15 +16,12 @@ export async function POST(req: NextRequest) {
     }
 
     const resend = new Resend(apiKey)
+    const sender = email ? `<b>${email}</b>` : '(미입력)'
     await resend.emails.send({
       from: 'WordOrder 문의 <onboarding@resend.dev>',
       to:   'ktikok2@gmail.com',
       subject: '[WordOrder] 문의가 도착했습니다',
-      text: [
-        email ? `보낸 사람: ${email}` : '보낸 사람: (미입력)',
-        '',
-        message.trim(),
-      ].join('\n'),
+      html: `<p><b>보낸 사람:</b> ${sender}</p><hr/><p>${message.trim().replace(/\n/g, '<br/>')}</p>`,
     })
 
     return NextResponse.json({ ok: true })
