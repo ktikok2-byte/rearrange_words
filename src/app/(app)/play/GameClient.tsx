@@ -431,27 +431,32 @@ export default function GameClient({ userId, initialProfile }: Props) {
           ))}
         </div>
 
-        {/* Spaced repetition modes */}
-        {REVIEW_MODES.some(r => counts[r.mode] > 0) && (
-          <div className="mt-6">
-            <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">스페이스드 복습</h3>
-            <div className="space-y-2">
-              {REVIEW_MODES.map(({ mode: m, label }) => (
-                <button key={m} onClick={() => startGame(m)}
-                  disabled={counts[m] === 0}
-                  className="w-full text-left px-5 py-3 rounded-xl border-2 border-purple-100 bg-white
-                    hover:border-purple-400 hover:bg-purple-50 transition-all disabled:opacity-40"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-medium text-slate-700 text-sm">{label}</span>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-600">
-                      {counts[m]}문장
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
+        {/* Spaced repetition modes — always visible */}
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">스페이스드 복습</h3>
+          <div className="space-y-2">
+            {([
+              { mode: 'review_24h' as GameMode, label: '24시간 이내 맞힌 문제 풀기' },
+              { mode: 'review_1w'  as GameMode, label: '24시간~1주일 맞힌 문제 풀기' },
+              { mode: 'review_3m'  as GameMode, label: '1주일~3개월 맞힌 문제 풀기' },
+              { mode: 'review_1y'  as GameMode, label: '3개월~1년 맞힌 문제 풀기' },
+              { mode: 'review_old' as GameMode, label: '1년 이상 후 맞힌 문제 풀기' },
+            ]).map(({ mode: m, label }) => (
+              <button key={m} onClick={() => startGame(m)}
+                disabled={counts[m] === 0}
+                className="w-full text-left px-5 py-3 rounded-xl border-2 border-purple-100 bg-white
+                  hover:border-purple-400 hover:bg-purple-50 transition-all disabled:opacity-40"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-700 text-sm">{label}</span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-600">
+                    {counts[m]}문장
+                  </span>
+                </div>
+              </button>
+            ))}
           </div>
+        </div>
         )}
 
         {sentences.length === 0 && (
