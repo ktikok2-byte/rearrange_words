@@ -10,39 +10,40 @@ interface Props {
 
 export default function GameTimer({ seconds, onExpire, paused = false }: Props) {
   const [remaining, setRemaining] = useState(seconds)
-  const expiredRef = useRef(false)
+  const startRef    = useRef<number | null>(null)  // Date.now() when timer began
+  const expiredRef  = useRef(false)
+  const onExpireRef = useRef(onExpire)
+  useEffect(() => { onExpireRef.current = onExpire })
 
+  // New sentence → reset everything
   useEffect(() => {
     setRemaining(seconds)
     expiredRef.current = false
+    startRef.current   = null
   }, [seconds])
 
+  // Single interval that reads wall-clock time, like time.time()
   useEffect(() => {
-    if (paused || expiredRef.current) return
-    if (remaining <= 0) {
-      if (!expiredRef.current) {
-        expiredRef.current = true
-        onExpire()
-      }
+    if (paused || expiredRef.current) {
+      startRef.current = null
       return
     }
 
+    if (startRef.current === null) startRef.current = Date.now()
+
     const id = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(id)
-          if (!expiredRef.current) {
-            expiredRef.current = true
-            onExpire()
-          }
-          return 0
-        }
-        return r - 1
-      })
-    }, 1000)
+      const elapsed = (Date.now() - startRef.current!) / 1000
+      const rem     = Math.max(0, seconds - elapsed)
+      setRemaining(Math.ceil(rem))
+      if (rem <= 0 && !expiredRef.current) {
+        expiredRef.current = true
+        onExpireRef.current()
+        clearInterval(id)
+      }
+    }, 200)
 
     return () => clearInterval(id)
-  }, [remaining, paused, onExpire])
+  }, [paused, seconds])  // single interval, never recreated mid-countdown
 
   const ratio = remaining / seconds
   const color = ratio > 0.5 ? 'bg-green-500' : ratio > 0.25 ? 'bg-yellow-500' : 'bg-red-500'
@@ -55,7 +56,7 @@ export default function GameTimer({ seconds, onExpire, paused = false }: Props) 
       </div>
       <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all duration-1000 ${color}`}
+          className={`h-full rounded-full transition-all duration-200 ${color}`}
           style={{ width: `${(remaining / seconds) * 100}%` }}
         />
       </div>

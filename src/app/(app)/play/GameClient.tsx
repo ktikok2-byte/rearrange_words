@@ -42,9 +42,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [reviewCategories, setReviewCategories] = useState<Record<number, string>>({})
   const [currentSentence, setCurrentSentence]   = useState<Sentence | null>(null)
   const [shuffledWords, setShuffledWords]       = useState<string[]>([])
-  // answerSlots: null = empty (word removed), string = placed word
-  const [answerSlots, setAnswerSlots]           = useState<(string | null)[]>([])
+  // answerEntries: words placed in answer area, each tracking which source slot it came from
+  const [answerEntries, setAnswerEntries]       = useState<{ word: string; sourceIdx: number }[]>([])
   const [usedIndices, setUsedIndices]           = useState<Set<number>>(new Set())
+  const submittingRef = useRef(false)
 
   const [timerSeconds, setTimerSeconds] = useState(3)
   const [timerPaused, setTimerPaused]   = useState(false)
@@ -68,7 +69,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   // ── Data loading ──────────────────────────────────────────
   useEffect(() => {
     async function load() {
-      const { data: sents } = await supabase.from('sentences').select('*').order('id')
+      const { data: sents } = await supabase.from('sentences').select('*').order('id').limit(99999)
       setSentences(sents ?? [])
 
       const { data: statuses } = await supabase
@@ -122,8 +123,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
     const shuffled = shuffleArray(words)
     setCurrentSentence(sentence)
     setShuffledWords(shuffled)
-    setAnswerSlots([])
+    setAnswerEntries([])
     setUsedIndices(new Set())
+    submittingRef.current = false
     const secs = calcTimerSeconds(words.length)
     setTimerSeconds(secs)
 
@@ -157,7 +159,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
         setPhase('refilling')
         const added = await triggerRefill(profile.current_level)
         if (added) {
-          const { data: sents } = await supabase.from('sentences').select('*').order('id')
+          const { data: sents } = await supabase.from('sentences').select('*').order('id').limit(99999)
           const newSents = sents ?? []
           setSentences(newSents)
           const result2 = findNextUnsolvedSentence(
@@ -200,32 +202,28 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
-    if (usedIndices.has(index)) return
+    if (usedIndices.has(index) || submittingRef.current) return
     const newUsed = new Set(usedIndices)
     newUsed.add(index)
     setUsedIndices(newUsed)
-    const newSlots = [...answerSlots, word]
-    setAnswerSlots(newSlots)
-    const actual = newSlots.filter((w): w is string => w !== null)
-    if (actual.length === shuffledWords.length) submitAnswer(actual)
+    const newEntries = [...answerEntries, { word, sourceIdx: index }]
+    setAnswerEntries(newEntries)
+    if (newEntries.length === shuffledWords.length) submitAnswer(newEntries.map(e => e.word))
   }
 
   const handleAnswerClick = (idx: number) => {
-    const word = answerSlots[idx]
-    if (word === null) return
-    const newSlots = [...answerSlots]
-    newSlots[idx] = null
-    setAnswerSlots(newSlots)
+    const entry = answerEntries[idx]
+    if (!entry) return
+    setAnswerEntries(answerEntries.filter((_, i) => i !== idx))
     const newUsed = new Set(usedIndices)
-    for (const i of Array.from(newUsed)) {
-      if (shuffledWords[i] === word) { newUsed.delete(i); break }
-    }
+    newUsed.delete(entry.sourceIdx)
     setUsedIndices(newUsed)
   }
 
   // ── Submit answer ─────────────────────────────────────────
   const submitAnswer = useCallback(async (answer: string[]) => {
-    if (!currentSentence || !startTime) return
+    if (!currentSentence || !startTime || submittingRef.current) return
+    submittingRef.current = true
     setTimerPaused(true)
 
     const correctWords = tokenize(currentSentence.target_text)
@@ -322,8 +320,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }, [currentSentence, startTime, mode, profile, userId, userStatuses, timerSeconds, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTimerExpire = useCallback(() => {
-    submitAnswer(answerSlots.filter((w): w is string => w !== null))
-  }, [answerSlots, submitAnswer])
+    submitAnswer(answerEntries.map(e => e.word))
+  }, [answerEntries, submitAnswer])
 
   // ===== RENDER =====
 
@@ -457,7 +455,6 @@ export default function GameClient({ userId, initialProfile }: Props) {
             ))}
           </div>
         </div>
-        )}
 
         {sentences.length === 0 && (
           <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-sm">
@@ -470,9 +467,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ── Result ────────────────────────────────────────────────
   if (phase === 'result' && lastResult) {
-    // Cap display time at timerSeconds to avoid confusion from JS timer drift
     const displaySec = lastResult.timeTakenMs !== null
-      ? Math.min(lastResult.timeTakenMs, lastResult.timerSeconds * 1000) / 1000
+      ? lastResult.timeTakenMs / 1000
       : null
 
     return (
@@ -536,7 +532,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   if (phase === 'playing' && currentSentence) {
     const correctWords = tokenize(currentSentence.target_text)
     const langName     = LANGUAGE_NAMES[currentSentence.target_language]
-    const actualAnswerCount = answerSlots.filter(w => w !== null).length
+    const actualAnswerCount = answerEntries.length
 
     return (
       <div className="max-w-lg mx-auto space-y-5">
@@ -585,38 +581,35 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
-            {/* Answer area: null slots show as ghost chips to keep positions fixed */}
+            {/* Answer area: words shift when removed (no ghost) */}
             <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
               ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
-              {answerSlots.length === 0 && (
+              {answerEntries.length === 0 && (
                 <span className="text-slate-300 text-sm self-center w-full text-center">
                   아래 단어를 순서대로 클릭하세요
                 </span>
               )}
-              {answerSlots.map((word, i) =>
-                word !== null ? (
-                  <WordCard key={i} word={word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
-                ) : (
-                  <div key={i} className="inline-flex items-center px-3 py-2 rounded-lg border-2 border-dashed border-slate-200 min-w-[2.5rem] h-[38px]" />
-                )
-              )}
+              {answerEntries.map((e, i) => (
+                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+              ))}
             </div>
 
+            {/* Source area: used words become invisible but keep their position so others don't shift */}
             <div className="flex flex-wrap gap-2">
-              {shuffledWords.map((word, i) =>
-                !usedIndices.has(i) && (
-                  <WordCard key={i} word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
-                )
-              )}
+              {shuffledWords.map((word, i) => (
+                <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
+                  <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
+                </div>
+              ))}
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => { setAnswerSlots([]); setUsedIndices(new Set()) }}
+              <button onClick={() => { setAnswerEntries([]); setUsedIndices(new Set()) }}
                 className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                 초기화
               </button>
               <button
-                onClick={() => actualAnswerCount > 0 && submitAnswer(answerSlots.filter((w): w is string => w !== null))}
+                onClick={() => actualAnswerCount > 0 && submitAnswer(answerEntries.map(e => e.word))}
                 disabled={actualAnswerCount === 0}
                 className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
                 제출

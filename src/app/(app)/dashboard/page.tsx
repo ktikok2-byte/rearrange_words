@@ -68,24 +68,24 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">
-            안녕하세요, {profile?.username}님!
-          </h2>
-          <p className="text-slate-500 text-sm mt-1">
-            모국어: {LANGUAGE_NAMES[(profile?.native_language ?? 'ko') as keyof typeof LANGUAGE_NAMES]}
-            {' · '}
-            학습 언어: {LANGUAGE_NAMES[(profile?.study_language ?? 'en') as keyof typeof LANGUAGE_NAMES]}
-          </p>
-        </div>
-        <Link
-          href="/play"
-          className="px-5 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-colors"
-        >
-          게임 시작
-        </Link>
+      <div>
+        <h2 className="text-2xl font-bold text-slate-800">
+          안녕하세요, {profile?.username}님!
+        </h2>
+        <p className="text-slate-500 text-sm mt-1">
+          모국어: {LANGUAGE_NAMES[(profile?.native_language ?? 'ko') as keyof typeof LANGUAGE_NAMES]}
+          {' · '}
+          학습 언어: {LANGUAGE_NAMES[(profile?.study_language ?? 'en') as keyof typeof LANGUAGE_NAMES]}
+        </p>
       </div>
+
+      {/* START button */}
+      <Link
+        href="/play"
+        className="block w-full py-4 bg-blue-600 text-white text-center text-lg font-extrabold rounded-2xl hover:bg-blue-700 transition-colors shadow-sm tracking-widest"
+      >
+        START
+      </Link>
 
       {/* Level */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-500 rounded-2xl p-6 text-white">
