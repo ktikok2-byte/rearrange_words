@@ -6,12 +6,14 @@ export interface Settings {
   showTranslation:  boolean
   useStartButton:   boolean
   secondsPerWord:   number   // timer seconds allocated per word
+  sentenceMode:     'server' | 'ai'
 }
 
 const DEFAULTS: Settings = {
   showTranslation: true,
   useStartButton:  true,
   secondsPerWord:  2.0,
+  sentenceMode:    'server',
 }
 
 const KEY = 'wordorder_settings'

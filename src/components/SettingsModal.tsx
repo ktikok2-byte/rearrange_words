@@ -1,6 +1,8 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
 import { useSettings } from '@/hooks/useSettings'
 
 interface Props {
@@ -42,6 +44,16 @@ function Toggle({
 export default function SettingsModal({ onClose }: Props) {
   const { settings, updateSetting } = useSettings()
   const [tab, setTab] = useState<Tab>('settings')
+  const router = useRouter()
+  const [loggingOut, setLoggingOut] = useState(false)
+
+  const handleLogout = async () => {
+    setLoggingOut(true)
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
 
   // contact form state
   const [senderEmail, setSenderEmail] = useState('')
@@ -143,6 +155,33 @@ export default function SettingsModal({ onClose }: Props) {
                 <span>5.0초</span>
               </div>
             </div>
+            <div className="border-t border-slate-100" />
+            <div>
+              <div className="font-medium text-slate-800 text-sm mb-1">문장 출처</div>
+              <div className="text-xs text-slate-500 mb-2">AI 모드는 Groq API 키가 필요합니다.</div>
+              <div className="flex gap-2">
+                {(['server', 'ai'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => updateSetting('sentenceMode', m)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors
+                      ${settings.sentenceMode === m
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
+                  >
+                    {m === 'server' ? '서버 문장' : 'AI 문장'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-slate-100" />
+            <button
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="w-full py-2.5 text-sm font-medium text-red-500 hover:bg-red-50 rounded-xl transition-colors disabled:opacity-40"
+            >
+              {loggingOut ? '로그아웃 중...' : '로그아웃'}
+            </button>
           </div>
         )}
 

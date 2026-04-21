@@ -1,25 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import SettingsModal from '@/components/SettingsModal'
 
 export default function BottomNav() {
   const pathname = usePathname()
-  const router = useRouter()
   const [showSettings, setShowSettings] = useState(false)
-  const [loggingOut, setLoggingOut] = useState(false)
-
-  const handleLogout = async () => {
-    setLoggingOut(true)
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
-    setLoggingOut(false)
-  }
 
   const navItems = [
     { href: '/play',      label: '게임' },
@@ -43,13 +31,6 @@ export default function BottomNav() {
             className="flex-1 py-3 text-sm font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap transition-colors"
           >
             설정
-          </button>
-          <button
-            onClick={handleLogout}
-            disabled={loggingOut}
-            className="flex-1 py-3 text-sm font-medium text-slate-500 hover:text-red-500 hover:bg-red-50 whitespace-nowrap transition-colors"
-          >
-            {loggingOut ? '...' : '로그아웃'}
           </button>
         </div>
       </nav>

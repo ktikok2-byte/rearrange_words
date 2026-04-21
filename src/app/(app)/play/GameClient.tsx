@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { GameMode, Profile, ReviewCategory, Sentence, LANGUAGE_NAMES } from '@/types'
@@ -60,7 +60,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
   // answerEntries: words placed in answer area, each tracking which source slot it came from
   const [answerEntries, setAnswerEntries]       = useState<{ word: string; sourceIdx: number }[]>([])
   const [usedIndices, setUsedIndices]           = useState<Set<number>>(new Set())
-  const submittingRef = useRef(false)
+  const submittingRef  = useRef(false)
+  const sourceAreaRef  = useRef<HTMLDivElement>(null)
+  const [answerMinH, setAnswerMinH] = useState(56)
 
   const [timerSeconds, setTimerSeconds] = useState(3)
   const [timerPaused, setTimerPaused]   = useState(false)
@@ -158,10 +160,42 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setStartTime(new Date())
   }
 
+  // ── AI sentence fetch ─────────────────────────────────────
+  const fetchAiSentence = useCallback(async (): Promise<Sentence | null> => {
+    try {
+      const res = await fetch('/api/ai-sentence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level: profile.current_level }),
+      })
+      if (!res.ok) return null
+      const { sentence } = await res.json()
+      if (sentence) {
+        setSentences(prev => [...prev, sentence])
+        return sentence
+      }
+    } catch (e) {
+      console.error('AI sentence fetch error:', e)
+    }
+    return null
+  }, [profile.current_level])
+
   // ── Start game ────────────────────────────────────────────
   const startGame = useCallback(async (selectedMode: GameMode) => {
     setMode(selectedMode)
     setLevelUpMsg(null)
+
+    // AI mode: generate a new sentence for any unsolved-style play
+    if (settings.sentenceMode === 'ai' && selectedMode === 'unsolved') {
+      setPhase('refilling')
+      const sentence = await fetchAiSentence()
+      if (sentence) {
+        launchSentence(sentence, profile.current_level, selectedMode)
+      } else {
+        setPhase('mode-select')
+      }
+      return
+    }
 
     if (selectedMode === 'unsolved') {
       const preferUp = lastLevelChangeRef.current !== 'down'
@@ -212,7 +246,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
       if (!sentence) { setPhase('mode-select'); return }
       launchSentence(sentence, profile.current_level, selectedMode)
     }
-  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase, fetchAiSentence, settings.sentenceMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
@@ -333,6 +367,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setPhase('result')
   }, [currentSentence, startTime, mode, profile, userId, userStatuses, timerSeconds, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Measure source area (all words always rendered) to pre-allocate answer area height.
+  // useLayoutEffect fires before paint so there's no visible flash.
+  useLayoutEffect(() => {
+    if (sourceAreaRef.current) setAnswerMinH(sourceAreaRef.current.offsetHeight)
+  }, [shuffledWords])
+
   const handleTimerExpire = useCallback(() => {
     submitAnswer(answerEntries.map(e => e.word))
   }, [answerEntries, submitAnswer])
@@ -406,7 +446,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
     return (
       <div className="max-w-lg mx-auto">
-        <h2 className="text-2xl font-bold text-slate-800 mb-2">게임 모드 선택</h2>
+        <div className="flex items-center gap-2 mb-2">
+          <h2 className="text-2xl font-bold text-slate-800">게임 모드 선택</h2>
+          {settings.sentenceMode === 'ai' && (
+            <span className="px-2 py-0.5 text-xs font-bold bg-purple-100 text-purple-600 rounded-full">AI 모드</span>
+          )}
+        </div>
         <p className="text-slate-500 text-sm mb-6">
           현재 레벨: <span className="font-bold text-blue-600">Lv.{profile.current_level}</span>
           {' '}({profile.current_level + 1}~{profile.current_level + 3}단어)
@@ -421,7 +466,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
             { mode: 'all'      as GameMode, label: '전체 문제 풀기',     desc: '모든 문제를 랜덤으로 풀어요.',                 color: 'slate' },
           ] as const).map(({ mode: m, label, desc, color }) => (
             <button key={m} onClick={() => startGame(m)}
-              disabled={sentences.length === 0 || counts[m] === 0}
+              disabled={m === 'unsolved' && settings.sentenceMode === 'ai' ? false : (sentences.length === 0 || counts[m] === 0)}
               className={`w-full text-left px-5 py-4 rounded-xl border-2 transition-all bg-white disabled:opacity-40
                 ${color === 'blue'  ? 'border-blue-200  hover:border-blue-500  hover:bg-blue-50'  : ''}
                 ${color === 'red'   ? 'border-red-200   hover:border-red-500   hover:bg-red-50'   : ''}
@@ -595,26 +640,30 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
-            {/* Source area: always on top so it never shifts when answer area grows below it.
-                Used words become invisible but keep their slot so remaining words don't reflow. */}
-            <div className="flex flex-wrap gap-2">
-              {shuffledWords.map((word, i) => (
-                <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
-                  <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
-                </div>
-              ))}
-            </div>
-
-            {/* Answer area: below source, so it can grow downward without affecting source position */}
-            <div className={`min-h-14 bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-              ${shake ? 'shake border-red-300' : 'border-slate-300'}`}>
+            {/* Answer area: on top so the built sentence is always visible above the finger.
+                min-height is pre-allocated from the source area measurement so source never shifts. */}
+            <div
+              style={{ minHeight: answerMinH }}
+              className={`bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
+                ${shake ? 'shake border-red-300' : 'border-slate-300'}`}
+            >
               {answerEntries.length === 0 && (
                 <span className="text-slate-300 text-sm self-center w-full text-center">
-                  위 단어를 순서대로 클릭하세요
+                  아래 단어를 순서대로 클릭하세요
                 </span>
               )}
               {answerEntries.map((e, i) => (
                 <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+              ))}
+            </div>
+
+            {/* Source area: below answer, measured with ref to drive answer min-height above.
+                Used words become invisible but keep their slot so remaining words don't reflow. */}
+            <div ref={sourceAreaRef} className="flex flex-wrap gap-2">
+              {shuffledWords.map((word, i) => (
+                <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
+                  <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
+                </div>
               ))}
             </div>
 
