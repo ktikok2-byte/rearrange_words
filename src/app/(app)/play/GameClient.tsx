@@ -13,7 +13,7 @@ import GameTimer from '@/components/GameTimer'
 import WordCard from '@/components/WordCard'
 import { useSettings } from '@/hooks/useSettings'
 
-type Phase = 'mode-select' | 'playing' | 'result' | 'refilling' | 'all-done'
+type Phase = 'mode-select' | 'playing' | 'result' | 'refilling' | 'all-done' | 'ai-loading'
 
 interface Props {
   userId: string
@@ -79,6 +79,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [shake, setShake]         = useState(false)
   const [levelUpMsg, setLevelUpMsg] = useState<string | null>(null)
   const [ready, setReady]         = useState(false)
+  const [aiError, setAiError]     = useState<string | null>(null)
 
   // Track direction of last level change for bidirectional skip
   const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
@@ -161,23 +162,25 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }
 
   // ── AI sentence fetch ─────────────────────────────────────
-  const fetchAiSentence = useCallback(async (): Promise<Sentence | null> => {
+  const fetchAiSentence = useCallback(async (): Promise<{ sentence: Sentence | null; error?: string }> => {
     try {
       const res = await fetch('/api/ai-sentence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ level: profile.current_level }),
       })
-      if (!res.ok) return null
-      const { sentence } = await res.json()
-      if (sentence) {
-        setSentences(prev => [...prev, sentence])
-        return sentence
+      const json = await res.json()
+      if (!res.ok) {
+        return { sentence: null, error: json.error ?? `HTTP ${res.status}` }
       }
+      if (json.sentence) {
+        setSentences(prev => [...prev, json.sentence])
+        return { sentence: json.sentence }
+      }
+      return { sentence: null, error: 'Empty response from AI' }
     } catch (e) {
-      console.error('AI sentence fetch error:', e)
+      return { sentence: null, error: String(e) }
     }
-    return null
   }, [profile.current_level])
 
   // ── Start game ────────────────────────────────────────────
@@ -185,13 +188,15 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setMode(selectedMode)
     setLevelUpMsg(null)
 
-    // AI mode: generate a new sentence for any unsolved-style play
+    // AI mode: generate a new sentence via Groq API
     if (settings.sentenceMode === 'ai' && selectedMode === 'unsolved') {
-      setPhase('refilling')
-      const sentence = await fetchAiSentence()
+      setAiError(null)
+      setPhase('ai-loading')
+      const { sentence, error } = await fetchAiSentence()
       if (sentence) {
         launchSentence(sentence, profile.current_level, selectedMode)
       } else {
+        setAiError(`AI 문장 생성 실패: ${error ?? '알 수 없는 오류'}`)
         setPhase('mode-select')
       }
       return
@@ -379,6 +384,16 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ===== RENDER =====
 
+  if (phase === 'ai-loading') {
+    return (
+      <div className="max-w-lg mx-auto text-center py-20 space-y-4">
+        <div className="text-4xl animate-spin inline-block">🤖</div>
+        <p className="text-slate-700 font-semibold">AI가 문제를 만들고 있어요...</p>
+        <p className="text-slate-400 text-sm">잠시만 기다려주세요.</p>
+      </div>
+    )
+  }
+
   if (phase === 'refilling') {
     return (
       <div className="max-w-lg mx-auto text-center py-20 space-y-4">
@@ -446,6 +461,15 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
     return (
       <div className="max-w-lg mx-auto">
+        {aiError && (
+          <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-2">
+            <span className="shrink-0">⚠️</span>
+            <div>
+              <p>{aiError}</p>
+              <button onClick={() => setAiError(null)} className="mt-1 text-xs underline text-red-500">닫기</button>
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2 mb-2">
           <h2 className="text-2xl font-bold text-slate-800">게임 모드 선택</h2>
           {settings.sentenceMode === 'ai' && (
