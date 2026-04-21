@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { GameMode, Profile, ReviewCategory, Sentence, LANGUAGE_NAMES } from '@/types'
+import { GameMode, Profile, ReviewCategory, Sentence, ToeflExercise, LANGUAGE_NAMES } from '@/types'
 import {
   shuffleArray, tokenize, checkAnswer,
   filterSentencesByMode, calcNewProfile, nextSentenceStatus,
@@ -13,7 +13,7 @@ import GameTimer from '@/components/GameTimer'
 import WordCard from '@/components/WordCard'
 import { useSettings } from '@/hooks/useSettings'
 
-type Phase = 'mode-select' | 'playing' | 'result' | 'refilling' | 'all-done' | 'ai-loading'
+type Phase = 'mode-select' | 'playing' | 'result' | 'refilling' | 'all-done' | 'ai-loading' | 'toefl-loading' | 'toefl-playing' | 'toefl-result'
 
 interface Props {
   userId: string
@@ -80,6 +80,16 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [levelUpMsg, setLevelUpMsg] = useState<string | null>(null)
   const [ready, setReady]         = useState(false)
   const [aiError, setAiError]     = useState<string | null>(null)
+
+  // TOEFL state
+  const [currentToefl, setCurrentToefl] = useState<ToeflExercise | null>(null)
+  const [toeflResult, setToeflResult]   = useState<{
+    isCorrect: boolean
+    timeTakenMs: number | null
+    correctAnswer: string
+    korean: string
+    sentence1: string
+  } | null>(null)
 
   // Track direction of last level change for bidirectional skip
   const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
@@ -183,6 +193,74 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
   }, [profile.current_level])
 
+  // ── TOEFL ─────────────────────────────────────────────────
+  const fetchToeflExercise = useCallback(async (): Promise<{ exercise: ToeflExercise | null; error?: string }> => {
+    try {
+      const res = await fetch('/api/ai-toefl', { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok) return { exercise: null, error: json.error ?? `HTTP ${res.status}` }
+      if (json.exercise) return { exercise: json.exercise }
+      return { exercise: null, error: 'Empty response from AI' }
+    } catch (e) {
+      return { exercise: null, error: String(e) }
+    }
+  }, [])
+
+  const startToefl = useCallback(async () => {
+    setAiError(null)
+    setPhase('toefl-loading')
+    const { exercise, error } = await fetchToeflExercise()
+    if (!exercise) {
+      setAiError(`TOEFL 문제 생성 실패: ${error ?? '알 수 없는 오류'}`)
+      setPhase('mode-select')
+      return
+    }
+    setCurrentToefl(exercise)
+    const words = [...exercise.sentence2_en.trim().split(/\s+/), exercise.dummy_word]
+    const shuffled = shuffleArray(words)
+    setShuffledWords(shuffled)
+    setAnswerEntries([])
+    setUsedIndices(new Set())
+    submittingRef.current = false
+    setTimerSeconds(30)
+    const useStart = settings.useStartButton
+    setTimerPaused(useStart)
+    setReady(useStart)
+    setStartTime(useStart ? null : new Date())
+    setToeflResult(null)
+    setPhase('toefl-playing')
+  }, [fetchToeflExercise, settings.useStartButton])
+
+  const submitToeflAnswer = useCallback(async (answer: string[]) => {
+    if (!currentToefl || !startTime || submittingRef.current) return
+    submittingRef.current = true
+    setTimerPaused(true)
+
+    const correctWords = currentToefl.sentence2_en.trim().split(/\s+/)
+    const isCorrect = answer.length === correctWords.length &&
+      answer.every((w, i) => w.toLowerCase() === correctWords[i].toLowerCase())
+    const now = new Date()
+    const timeTakenMs = now.getTime() - startTime.getTime()
+
+    if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
+
+    await supabase.from('user_toefl_status').insert({
+      user_id:      userId,
+      exercise_id:  currentToefl.id,
+      is_correct:   isCorrect,
+      time_taken_ms: isCorrect ? timeTakenMs : null,
+    })
+
+    setToeflResult({
+      isCorrect,
+      timeTakenMs: isCorrect ? timeTakenMs : null,
+      correctAnswer: currentToefl.sentence2_en,
+      korean:        currentToefl.korean,
+      sentence1:     currentToefl.sentence1_en,
+    })
+    setPhase('toefl-result')
+  }, [currentToefl, startTime, userId, supabase])
+
   // ── Start game ────────────────────────────────────────────
   const startGame = useCallback(async (selectedMode: GameMode) => {
     setMode(selectedMode)
@@ -261,7 +339,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setUsedIndices(newUsed)
     const newEntries = [...answerEntries, { word, sourceIdx: index }]
     setAnswerEntries(newEntries)
-    if (newEntries.length === shuffledWords.length) submitAnswer(newEntries.map(e => e.word))
+    // TOEFL has a dummy word so auto-submit is not applicable; only regular mode auto-submits
+    if (phase !== 'toefl-playing' && newEntries.length === shuffledWords.length) {
+      submitAnswer(newEntries.map(e => e.word))
+    }
   }
 
   const handleAnswerClick = (idx: number) => {
@@ -379,10 +460,147 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }, [shuffledWords])
 
   const handleTimerExpire = useCallback(() => {
-    submitAnswer(answerEntries.map(e => e.word))
-  }, [answerEntries, submitAnswer])
+    if (phase === 'toefl-playing') {
+      submitToeflAnswer(answerEntries.map(e => e.word))
+    } else {
+      submitAnswer(answerEntries.map(e => e.word))
+    }
+  }, [phase, answerEntries, submitAnswer, submitToeflAnswer])
 
   // ===== RENDER =====
+
+  if (phase === 'toefl-loading') {
+    return (
+      <div className="max-w-lg mx-auto text-center py-20 space-y-4">
+        <div className="text-4xl animate-spin inline-block">🤖</div>
+        <p className="text-slate-700 font-semibold">TOEFL 문제를 만들고 있어요...</p>
+        <p className="text-slate-400 text-sm">잠시만 기다려주세요.</p>
+      </div>
+    )
+  }
+
+  if (phase === 'toefl-result' && toeflResult) {
+    const displaySec = toeflResult.timeTakenMs !== null ? toeflResult.timeTakenMs / 1000 : null
+    return (
+      <div className="max-w-lg mx-auto bounce-in">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 text-orange-600 rounded-full">TOEFL Writing 유형1</span>
+        </div>
+        <div className={`rounded-2xl border-2 p-6 mb-6 ${toeflResult.isCorrect ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'}`}>
+          <div className="text-3xl mb-2">{toeflResult.isCorrect ? '✅' : '❌'}</div>
+          <div className={`text-xl font-bold mb-1 ${toeflResult.isCorrect ? 'text-green-700' : 'text-red-700'}`}>
+            {toeflResult.isCorrect ? '정답!' : '오답'}
+          </div>
+          {displaySec !== null && (
+            <div className="text-sm text-green-600 mb-3">{displaySec.toFixed(2)}초 만에 맞췄어요!</div>
+          )}
+          <div className="bg-white rounded-xl p-4 border border-slate-100 space-y-3">
+            <div>
+              <span className="text-xs text-slate-400 uppercase font-medium">앞 문장 (맥락)</span>
+              <p className="text-slate-700 mt-0.5 italic">{toeflResult.sentence1}</p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-400 uppercase font-medium">정답 문장</span>
+              <p className="text-slate-800 font-medium mt-0.5">{toeflResult.correctAnswer}</p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-400 uppercase font-medium">한국어 번역</span>
+              <p className="text-slate-600 mt-0.5">{toeflResult.korean}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={startToefl}
+            className="flex-1 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors">
+            다음 문제
+          </button>
+          <button onClick={() => { setPhase('mode-select') }}
+            className="px-5 py-3 bg-white text-slate-700 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
+            모드 선택
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (phase === 'toefl-playing' && currentToefl) {
+    const correctWordCount = currentToefl.word_count2
+    const actualAnswerCount = answerEntries.length
+
+    return (
+      <div className="max-w-lg mx-auto space-y-5">
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span className="flex items-center gap-2">
+            <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 text-orange-600 rounded-full">TOEFL 유형1</span>
+          </span>
+          <span>English · {correctWordCount}단어 + 가짜 1개</span>
+        </div>
+
+        <GameTimer
+          key={currentToefl.id}
+          seconds={30}
+          onExpire={handleTimerExpire}
+          paused={timerPaused}
+        />
+
+        {/* Context sentence */}
+        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 space-y-1">
+          <span className="text-xs font-semibold text-orange-500 uppercase tracking-wide">앞 문장 (맥락)</span>
+          <p className="text-slate-800 text-sm italic">{currentToefl.sentence1_en}</p>
+          <p className="text-slate-500 text-xs">{currentToefl.korean}</p>
+        </div>
+
+        {ready ? (
+          <div className="flex flex-col items-center justify-center gap-4 py-6">
+            <p className="text-slate-400 text-sm">준비되면 아래 버튼을 누르세요</p>
+            <button
+              onClick={handleStartTimer}
+              className="px-10 py-4 bg-orange-500 text-white text-lg font-bold rounded-2xl hover:bg-orange-600 transition-colors shadow-lg">
+              ▶ 시작
+            </button>
+          </div>
+        ) : (
+          <>
+            <div
+              style={{ minHeight: answerMinH }}
+              className={`bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
+                ${shake ? 'shake border-red-300' : 'border-orange-200'}`}
+            >
+              {answerEntries.length === 0 && (
+                <span className="text-slate-300 text-sm self-center w-full text-center">
+                  아래 단어를 순서대로 클릭하세요 (가짜 단어 1개 포함)
+                </span>
+              )}
+              {answerEntries.map((e, i) => (
+                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+              ))}
+            </div>
+
+            <div ref={sourceAreaRef} className="flex flex-wrap gap-2">
+              {shuffledWords.map((word, i) => (
+                <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
+                  <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3">
+              <button onClick={() => { setAnswerEntries([]); setUsedIndices(new Set()) }}
+                className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                초기화
+              </button>
+              <button
+                onClick={() => actualAnswerCount > 0 && submitToeflAnswer(answerEntries.map(e => e.word))}
+                disabled={actualAnswerCount === 0}
+                className="flex-1 py-2.5 text-sm font-semibold text-white bg-orange-500 rounded-xl hover:bg-orange-600 disabled:opacity-40 transition-colors">
+                제출
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
 
   if (phase === 'ai-loading') {
     return (
@@ -537,6 +755,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* TOEFL Writing mode */}
+        <div className="mt-6">
+          <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">TOEFL 연습</h3>
+          <button
+            onClick={startToefl}
+            className="w-full text-left px-5 py-4 rounded-xl border-2 border-orange-200 bg-white hover:border-orange-400 hover:bg-orange-50 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-800">TOEFL Writing 유형1</span>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">AI · 30초</span>
+            </div>
+            <div className="text-sm text-slate-500 mt-0.5">연관된 두 문장 중 두 번째 문장을 완성하세요. (가짜 단어 1개 포함)</div>
+          </button>
         </div>
 
         {sentences.length === 0 && (

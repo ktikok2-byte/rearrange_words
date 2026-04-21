@@ -98,6 +98,16 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
   en: 'English',
 }
 
+export interface ToeflExercise {
+  id:           number
+  sentence1_en: string
+  sentence2_en: string
+  korean:       string
+  dummy_word:   string
+  word_count2:  number
+  created_at:   string
+}
+
 // Level n → (n+1)~(n+3) words  (Level 1: 2~4, Level 2: 3~5, Level 3: 4~6, ...)
 export const LEVEL_WORD_RANGE = (level: number): [number, number] => {
   return [level + 1, level + 3]
