@@ -730,6 +730,20 @@ export default function GameClient({ userId, initialProfile }: Props) {
           ))}
         </div>
 
+        {/* TOEFL Writing mode */}
+        <div className="mt-4">
+          <button
+            onClick={startToefl}
+            className="w-full text-left px-5 py-4 rounded-xl border-2 border-orange-200 bg-orange-50 hover:border-orange-400 hover:bg-orange-100 transition-all"
+          >
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-800">TOEFL Writing 유형1</span>
+              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-200 text-orange-700">AI · 30초</span>
+            </div>
+            <div className="text-sm text-slate-500 mt-0.5">연관된 두 문장 중 두 번째 문장을 완성하세요. (가짜 단어 1개 포함)</div>
+          </button>
+        </div>
+
         {/* Spaced repetition modes — always visible */}
         <div className="mt-6">
           <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">스페이스드 복습</h3>
@@ -755,21 +769,6 @@ export default function GameClient({ userId, initialProfile }: Props) {
               </button>
             ))}
           </div>
-        </div>
-
-        {/* TOEFL Writing mode */}
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wide">TOEFL 연습</h3>
-          <button
-            onClick={startToefl}
-            className="w-full text-left px-5 py-4 rounded-xl border-2 border-orange-200 bg-white hover:border-orange-400 hover:bg-orange-50 transition-all"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-slate-800">TOEFL Writing 유형1</span>
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-100 text-orange-600">AI · 30초</span>
-            </div>
-            <div className="text-sm text-slate-500 mt-0.5">연관된 두 문장 중 두 번째 문장을 완성하세요. (가짜 단어 1개 포함)</div>
-          </button>
         </div>
 
         {sentences.length === 0 && (
