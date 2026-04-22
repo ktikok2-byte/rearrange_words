@@ -82,8 +82,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [aiError, setAiError]     = useState<string | null>(null)
 
   // TOEFL state
-  const toeflContextRef = useRef<'new' | 'wrong'>('new') // tracks whether last TOEFL was AI-new or wrong-replay
-  const [currentToefl, setCurrentToefl]     = useState<ToeflExercise | null>(null)
+  const toeflContextRef  = useRef<'new' | 'wrong'>('new')
+  const prefetchingRef   = useRef(false) // prevents duplicate background fetches
+  const [prefetchedToefl, setPrefetchedToefl] = useState<ToeflExercise | null>(null)
+  const [currentToefl, setCurrentToefl]       = useState<ToeflExercise | null>(null)
   const [toeflResult, setToeflResult]       = useState<{
     isCorrect: boolean
     timeTakenMs: number | null
@@ -225,6 +227,15 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
   }, [])
 
+  // Fetches the next exercise in the background while the user is solving the current one
+  const prefetchNextToefl = useCallback(async () => {
+    if (prefetchingRef.current) return
+    prefetchingRef.current = true
+    const { exercise } = await fetchToeflExercise()
+    prefetchingRef.current = false
+    if (exercise) setPrefetchedToefl(exercise)
+  }, [fetchToeflExercise])
+
   const launchToeflExercise = useCallback((exercise: ToeflExercise) => {
     setCurrentToefl(exercise)
     const words = [...exercise.sentence2_en.trim().split(/\s+/), exercise.dummy_word]
@@ -240,11 +251,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setStartTime(useStart ? null : new Date())
     setToeflResult(null)
     setPhase('toefl-playing')
-  }, [settings.useStartButton])
+    // Start fetching next exercise in background (only for AI-new mode)
+    if (toeflContextRef.current === 'new') prefetchNextToefl()
+  }, [settings.useStartButton, prefetchNextToefl])
 
   const startToefl = useCallback(async () => {
     toeflContextRef.current = 'new'
     setAiError(null)
+    // Use prefetched exercise if ready — no loading screen needed
+    if (prefetchedToefl) {
+      const exercise = prefetchedToefl
+      setPrefetchedToefl(null)
+      launchToeflExercise(exercise)
+      return
+    }
+    // First time (no prefetch yet): show loading and fetch
     setPhase('toefl-loading')
     const { exercise, error } = await fetchToeflExercise()
     if (!exercise) {
@@ -253,7 +274,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
       return
     }
     launchToeflExercise(exercise)
-  }, [fetchToeflExercise, launchToeflExercise])
+  }, [prefetchedToefl, fetchToeflExercise, launchToeflExercise])
 
   const startWrongToefl = useCallback(async () => {
     if (toeflWrongIds.length === 0) { setPhase('mode-select'); return }
