@@ -45,7 +45,7 @@ Examples to follow strictly:
 {"sentence1": "Many ancient civilizations built massive stone pyramids.", "sentence2": "These incredible structures served as tombs for rulers.", "korean": "많은 고대 문명들은 거대한 돌 피라미드를 건설했습니다. 이 놀라운 구조물들은 통치자들을 위한 무덤 역할을 했습니다.", "dummy": "serving"}
 {"sentence1": "Economic inflation decreases the purchasing power of currency.", "sentence2": "Consequently, everyday goods become much more expensive.", "korean": "경제적 인플레이션은 통화의 구매력을 감소시킵니다. 결과적으로 일상적인 상품들은 훨씬 더 비싸집니다.", "dummy": "becoming"}`,
         }],
-        temperature: 0.3, // Lowered significantly for strict grammatical accuracy and predictable output
+        temperature: 0.9, // Lowered significantly for strict grammatical accuracy and predictable output
         max_tokens: 300,
       }),
     })

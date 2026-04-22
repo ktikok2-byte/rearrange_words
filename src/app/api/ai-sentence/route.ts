@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
           role: 'user',
           content: `Generate a natural Korean sentence and its grammatically perfect English translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"korean": "오늘 날씨가 정말 좋다.", "english": "The weather is very nice."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
         }],
-        temperature: 0.5, // Lowered temperature to prevent grammar hallucinations
+        temperature: 0.9, // Lowered temperature to prevent grammar hallucinations
         max_tokens: 200,
       }),
     })
