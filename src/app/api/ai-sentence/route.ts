@@ -1,23 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getWordRangeForLevel } from '@/lib/game'
-import { callGroq, checkEnglishGrammar } from '@/lib/groq'
+import { callGroq, checkEnglishGrammar, pickRandomStructure } from '@/lib/groq'
 import { generateUniqueTopic } from '@/lib/topics'
-
-const STRUCTURES = [
-  'a direct wh-question (wh-word + auxiliary + subject + verb, e.g. "Where did she go?")',
-  'a yes/no question (auxiliary + subject + verb, e.g. "Has he finished the report?")',
-  'a sentence containing an indirect question (e.g. "Do you know where he went?" or "I wonder if she arrived.")',
-  'a sentence with a noun that-clause or wh-clause (e.g. "She believes that climate change is urgent." or "What he said surprised everyone.")',
-  'an opinion or evaluation sentence using "I think", "I found", or "In my opinion"',
-  'a reported speech sentence (subject + said/asked/explained + that + subject + verb)',
-  'a sentence with a subject relative clause (e.g. "The scientist who discovered penicillin changed medicine.")',
-  'a sentence with an object relative clause (e.g. "The book that she recommended was fascinating.")',
-  'a sentence using present perfect or past perfect tense to show time contrast',
-  'a sentence in passive voice (e.g. "The report was submitted by the committee.")',
-  'a comparison sentence using comparative + than, or too/enough/much more (e.g. "This method is far more efficient than the old one.")',
-  'a sentence with a frequency, degree, manner, or time adverb in a notable position (e.g. "Rarely do scientists agree on everything.")',
-]
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,7 +23,7 @@ export async function POST(req: NextRequest) {
 
     const [minWords, maxWords] = getWordRangeForLevel(level)
     const targetWords = Math.floor(Math.random() * (maxWords - minWords + 1)) + minWords
-    const structure   = STRUCTURES[Math.floor(Math.random() * STRUCTURES.length)]
+    const structure   = pickRandomStructure()
 
     // 1. Generate unique topic (fast model)
     const topic = await generateUniqueTopic(apiKey, supabase)

@@ -2,6 +2,25 @@ export const GROQ_MODEL      = 'llama-3.3-70b-versatile' // sentence generation 
 export const GROQ_MODEL_FAST = 'llama-3.1-8b-instant'   // topic generation (fast, light)
 export const GROQ_API_URL    = 'https://api.groq.com/openai/v1/chat/completions'
 
+const STRUCTURES = [
+  'a direct wh-question (wh-word + auxiliary + subject + verb, e.g. "Where did she go?")',
+  'a yes/no question (auxiliary + subject + verb, e.g. "Has he finished the report?")',
+  'a sentence containing an indirect question (e.g. "Do you know where he went?" or "I wonder if she arrived.")',
+  'a sentence with a noun that-clause or wh-clause (e.g. "She believes that climate change is urgent." or "What he said surprised everyone.")',
+  'an opinion or evaluation sentence using "I think", "I found", or "In my opinion"',
+  'a reported speech sentence (subject + said/asked/explained + that + subject + verb)',
+  'a sentence with a subject relative clause (e.g. "The scientist who discovered penicillin changed medicine.")',
+  'a sentence with an object relative clause (e.g. "The book that she recommended was fascinating.")',
+  'a sentence using present perfect or past perfect tense to show time contrast',
+  'a sentence in passive voice (e.g. "The report was submitted by the committee.")',
+  'a comparison sentence using comparative + than, or too/enough/much more (e.g. "This method is far more efficient than the old one.")',
+  'a sentence with a frequency, degree, manner, or time adverb in a notable position (e.g. "Rarely do scientists agree on everything.")',
+]
+
+export function pickRandomStructure(): string {
+  return STRUCTURES[Math.floor(Math.random() * STRUCTURES.length)]
+}
+
 export type GroqMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
 export async function callGroq(

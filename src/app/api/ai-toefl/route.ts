@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { callGroq, checkEnglishGrammar } from '@/lib/groq'
+import { callGroq, checkEnglishGrammar, pickRandomStructure } from '@/lib/groq'
 import { generateUniqueTopic } from '@/lib/topics'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +18,8 @@ export async function POST(_req: NextRequest) {
     )
 
     // 1. Generate unique topic (fast model)
-    const topic = await generateUniqueTopic(apiKey, supabase)
+    const topic     = await generateUniqueTopic(apiKey, supabase)
+    const structure = pickRandomStructure()
 
     // 2. Generate exercise
     let content: string
@@ -34,9 +35,10 @@ export async function POST(_req: NextRequest) {
 
 Rules:
 1. Both sentences must be exactly 7 to 10 words long.
-2. The English MUST be perfectly natural, idiomatic, and grammatically flawless. Do NOT use awkward phrasing just to meet the word count.
-3. Provide perfect Korean translations for BOTH sentence 1 and sentence 2, combined together into a single string.
-4. Provide ONE dummy English word that acts as a plausible distractor. It must be semantically related to the topic, but strictly grammatically incorrect to use anywhere in sentence 2.
+2. Sentence 2 MUST use this grammatical structure: ${structure}
+3. The English MUST be perfectly natural, idiomatic, and grammatically flawless. Do NOT use awkward phrasing just to meet the word count.
+4. Provide perfect Korean translations for BOTH sentence 1 and sentence 2, combined together into a single string.
+5. Provide ONE dummy English word that acts as a plausible distractor. It must be semantically related to the topic, but strictly grammatically incorrect to use anywhere in sentence 2.
 
 Examples to follow strictly:
 {"sentence1": "Photosynthesis requires sunlight to convert water into energy.", "sentence2": "This complex process sustains almost all earthly lifeforms.", "korean": "광합성은 물을 에너지로 변환하기 위해 햇빛을 필요로 합니다. 이 복잡한 과정은 거의 모든 지구 생명체를 유지합니다.", "dummy": "sustaining"}
