@@ -25,15 +25,15 @@ export async function POST(_req: NextRequest) {
           content: `Create two contextually connected English sentences about a specific academic topic. 
 
 Rules:
-1. Both sentences must be exactly 7-10 words long.
-2. Grammar must be at an advanced TOEFL level.
+1. Both sentences must be 7-10 words long.
+2. The English MUST be perfectly natural, idiomatic, and grammatically flawless. Do NOT use awkward, robotic, or forced phrasing just to meet the word count or sound "advanced".
 3. Provide perfect Korean translations for BOTH sentence 1 and sentence 2, combined together into a single string.
 4. Provide ONE dummy English word that acts as a plausible distractor. It must be semantically related to the topic to confuse a human, but strictly grammatically incorrect or structurally impossible to use anywhere in sentence 2.
 
 Example format to follow strictly:
 {"sentence1": "Photosynthesis requires sunlight to convert water into energy.", "sentence2": "This complex process sustains almost all earthly lifeforms.", "korean": "광합성은 물을 에너지로 변환하기 위해 햇빛을 필요로 합니다. 이 복잡한 과정은 거의 모든 지구 생명체를 유지합니다.", "dummy": "sustaining"}`,
         }],
-        temperature: 0.7, // Lowered for better grammatical stability and logic
+        temperature: 0.3, // Lowered significantly for strict grammatical accuracy and predictable output
         max_tokens: 300,
       }),
     })
