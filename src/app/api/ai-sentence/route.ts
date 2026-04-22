@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
           content: 'You are an expert bilingual language teacher. Your goal is to create flawless Korean-English sentence pairs. The Korean must sound natural and conversational to a native speaker. The English must be grammatically perfect. Always return valid JSON.',
         }, {
           role: 'user',
-          content: `Generate a natural Korean sentence and its grammatically perfect English translation. The English sentence must contain exactly ${targetWords} words. Return ONLY a JSON object with exactly these keys: {"korean": "...", "english": "..."}`,
+          content: `Generate a natural Korean sentence and its grammatically perfect English translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"korean": "오늘 날씨가 정말 좋다.", "english": "The weather is very nice."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
         }],
         temperature: 0.5, // Lowered temperature to prevent grammar hallucinations
         max_tokens: 200,
@@ -53,13 +53,18 @@ export async function POST(req: NextRequest) {
     if (!jsonMatch) {
       return NextResponse.json({ error: 'Invalid AI response' }, { status: 502 })
     }
-    const parsed = JSON.parse(jsonMatch[0]) as { korean?: string; english?: string }
+    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
 
-    if (!parsed.korean || !parsed.english) {
+    // Accept common key-name variations the model sometimes uses
+    const korean = (parsed.korean || parsed.Korean || parsed.korean_sentence || parsed.korean_text) as string | undefined
+    const english = (parsed.english || parsed.English || parsed.english_sentence || parsed.english_text) as string | undefined
+
+    if (!korean || !english) {
+      console.error('Missing fields in AI response. Got:', JSON.stringify(parsed))
       return NextResponse.json({ error: 'Missing fields in AI response' }, { status: 502 })
     }
 
-    const actualWordCount = parsed.english.trim().split(/\s+/).length
+    const actualWordCount = english.trim().split(/\s+/).length
 
     // Save to DB using service role (bypasses RLS for sentence insertion)
     const supabase = createClient(
@@ -71,9 +76,9 @@ export async function POST(req: NextRequest) {
       .from('sentences')
       .insert({
         source_language:  'ko',
-        source_text:      parsed.korean.trim(),
+        source_text:      korean.trim(),
         target_language:  'en',
-        target_text:      parsed.english.trim(),
+        target_text:      english.trim(),
         word_count:       actualWordCount,
         difficulty_level: level,
         language_pair:    'ko-en',
