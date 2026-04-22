@@ -19,21 +19,20 @@ export async function POST(_req: NextRequest) {
         response_format: { type: 'json_object' }, // Enforce Groq's native JSON mode
         messages: [{
           role: 'system',
-          content: 'You are an expert bilingual TOEFL writing teacher. Generate grammatically flawless English sentences and highly natural, accurate Korean translations. Return ONLY valid JSON.',
+          content: 'You are a TOEFL writing teacher. Each time you are called, choose a DIFFERENT topic — vary broadly across science, history, economics, psychology, environment, technology, art, philosophy, etc. Return ONLY valid JSON, no markdown.',
         }, {
           role: 'user',
-          content: `Create two contextually connected English sentences about a specific academic topic. 
+          content: `Pick a random academic topic and write two consecutive sentences about it (like two sentences from the same paragraph). The sentences must be contextually connected — sentence2 follows naturally from sentence1.
 
 Rules:
-1. Both sentences must be exactly 7-10 words long.
-2. Grammar must be at an advanced TOEFL level.
-3. Provide a perfect Korean translation for sentence 2.
-4. Provide ONE dummy English word completely irrelevant to sentence 2.
+- Each sentence must be 7-10 words long
+- sentence2 must be grammatically complete and standalone-solvable
+- korean: natural Korean translation of sentence2 only
+- dummy: one English word that clearly does NOT belong in sentence2
 
-Example format to follow strictly:
-{"sentence1": "Photosynthesis requires sunlight to convert water into energy.", "sentence2": "This complex process sustains almost all earthly lifeforms.", "korean": "이 복잡한 과정은 거의 모든 지구 생명체를 유지합니다.", "dummy": "laptop"}`,
+Return this JSON: {"sentence1": "...", "sentence2": "...", "korean": "...", "dummy": "..."}`,
         }],
-        temperature: 0.7, // Lowered for better grammatical stability and logic
+        temperature: 0.95,
         max_tokens: 300,
       }),
     })
