@@ -7,6 +7,7 @@ export interface Settings {
   useStartButton:   boolean
   secondsPerWord:   number   // timer seconds allocated per word
   sentenceMode:     'server' | 'ai'
+  gameMode:         'normal' | 'toefl'
 }
 
 const DEFAULTS: Settings = {
@@ -14,6 +15,7 @@ const DEFAULTS: Settings = {
   useStartButton:  true,
   secondsPerWord:  2.0,
   sentenceMode:    'server',
+  gameMode:        'normal',
 }
 
 const KEY = 'wordorder_settings'

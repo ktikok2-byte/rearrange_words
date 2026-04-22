@@ -82,14 +82,20 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [aiError, setAiError]     = useState<string | null>(null)
 
   // TOEFL state
-  const [currentToefl, setCurrentToefl] = useState<ToeflExercise | null>(null)
-  const [toeflResult, setToeflResult]   = useState<{
+  const toeflContextRef = useRef<'new' | 'wrong'>('new') // tracks whether last TOEFL was AI-new or wrong-replay
+  const [currentToefl, setCurrentToefl]     = useState<ToeflExercise | null>(null)
+  const [toeflResult, setToeflResult]       = useState<{
     isCorrect: boolean
     timeTakenMs: number | null
     correctAnswer: string
     korean: string
     sentence1: string
   } | null>(null)
+  // exerciseId → latest attempt: { isCorrect, attemptedAt }
+  const [toeflStatuses, setToeflStatuses]   = useState<Record<number, { isCorrect: boolean; attemptedAt: string }>>({})
+  const toeflWrongIds = Object.entries(toeflStatuses)
+    .filter(([, v]) => !v.isCorrect)
+    .map(([id]) => Number(id))
 
   // Track direction of last level change for bidirectional skip
   const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
@@ -113,6 +119,19 @@ export default function GameClient({ userId, initialProfile }: Props) {
       })
       setUserStatuses(statusMap)
       setReviewCategories(categoryMap)
+
+      // Load TOEFL attempt history — build latest-attempt-per-exercise map
+      const { data: toeflRows } = await supabase
+        .from('user_toefl_status')
+        .select('exercise_id, is_correct, attempted_at')
+        .eq('user_id', userId)
+        .order('attempted_at', { ascending: true })
+
+      const toeflMap: Record<number, { isCorrect: boolean; attemptedAt: string }> = {}
+      toeflRows?.forEach(r => {
+        toeflMap[r.exercise_id] = { isCorrect: r.is_correct, attemptedAt: r.attempted_at }
+      })
+      setToeflStatuses(toeflMap)
     }
     load()
   }, [userId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -206,15 +225,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
   }, [])
 
-  const startToefl = useCallback(async () => {
-    setAiError(null)
-    setPhase('toefl-loading')
-    const { exercise, error } = await fetchToeflExercise()
-    if (!exercise) {
-      setAiError(`TOEFL 문제 생성 실패: ${error ?? '알 수 없는 오류'}`)
-      setPhase('mode-select')
-      return
-    }
+  const launchToeflExercise = useCallback((exercise: ToeflExercise) => {
     setCurrentToefl(exercise)
     const words = [...exercise.sentence2_en.trim().split(/\s+/), exercise.dummy_word]
     const shuffled = shuffleArray(words)
@@ -229,7 +240,38 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setStartTime(useStart ? null : new Date())
     setToeflResult(null)
     setPhase('toefl-playing')
-  }, [fetchToeflExercise, settings.useStartButton])
+  }, [settings.useStartButton])
+
+  const startToefl = useCallback(async () => {
+    toeflContextRef.current = 'new'
+    setAiError(null)
+    setPhase('toefl-loading')
+    const { exercise, error } = await fetchToeflExercise()
+    if (!exercise) {
+      setAiError(`TOEFL 문제 생성 실패: ${error ?? '알 수 없는 오류'}`)
+      setPhase('mode-select')
+      return
+    }
+    launchToeflExercise(exercise)
+  }, [fetchToeflExercise, launchToeflExercise])
+
+  const startWrongToefl = useCallback(async () => {
+    if (toeflWrongIds.length === 0) return
+    toeflContextRef.current = 'wrong'
+    const randomId = toeflWrongIds[Math.floor(Math.random() * toeflWrongIds.length)]
+    setPhase('toefl-loading')
+    const { data: exercise, error } = await supabase
+      .from('toefl_exercises')
+      .select('*')
+      .eq('id', randomId)
+      .single()
+    if (error || !exercise) {
+      setAiError('TOEFL 문제를 불러오지 못했습니다.')
+      setPhase('mode-select')
+      return
+    }
+    launchToeflExercise(exercise as ToeflExercise)
+  }, [toeflWrongIds, supabase, launchToeflExercise])
 
   const submitToeflAnswer = useCallback(async (answer: string[]) => {
     if (!currentToefl || !startTime || submittingRef.current) return
@@ -250,6 +292,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
       is_correct:   isCorrect,
       time_taken_ms: isCorrect ? timeTakenMs : null,
     })
+
+    // Update in-memory TOEFL status (latest attempt per exercise)
+    setToeflStatuses(prev => ({
+      ...prev,
+      [currentToefl.id]: { isCorrect, attemptedAt: now.toISOString() },
+    }))
 
     setToeflResult({
       isCorrect,
@@ -510,9 +558,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         </div>
         <div className="flex gap-3">
-          <button onClick={startToefl}
+          <button
+            onClick={toeflContextRef.current === 'wrong' ? startWrongToefl : startToefl}
             className="flex-1 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors">
-            다음 문제
+            {toeflContextRef.current === 'wrong' ? '다음 틀린 문제' : '다음 문제'}
           </button>
           <button onClick={() => { setPhase('mode-select') }}
             className="px-5 py-3 bg-white text-slate-700 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
@@ -547,7 +596,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
         <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 space-y-1">
           <span className="text-xs font-semibold text-orange-500 uppercase tracking-wide">앞 문장 (맥락)</span>
           <p className="text-slate-800 text-sm italic">{currentToefl.sentence1_en}</p>
-          <p className="text-slate-500 text-xs">{currentToefl.korean}</p>
+          {settings.showTranslation && (
+            <p className="text-slate-500 text-xs">{currentToefl.korean}</p>
+          )}
         </div>
 
         {ready ? (
@@ -688,6 +739,45 @@ export default function GameClient({ userId, initialProfile }: Props) {
             </div>
           </div>
         )}
+        {settings.gameMode === 'toefl' ? (
+          /* ── TOEFL mode select ───────────────────────────── */
+          <>
+            <div className="flex items-center gap-2 mb-2">
+              <h2 className="text-2xl font-bold text-slate-800">TOEFL Writing 유형1</h2>
+              <span className="px-2 py-0.5 text-xs font-bold bg-orange-100 text-orange-600 rounded-full">TOEFL 모드</span>
+            </div>
+            <p className="text-slate-500 text-sm mb-6">
+              설정에서 일반 모드로 변경할 수 있습니다.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={startToefl}
+                className="w-full text-left px-5 py-4 rounded-xl border-2 border-orange-200 bg-orange-50 hover:border-orange-400 hover:bg-orange-100 transition-all"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-800">새 문제 (AI 생성)</span>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-orange-200 text-orange-700">AI · 30초</span>
+                </div>
+                <div className="text-sm text-slate-500 mt-0.5">연관된 두 문장 중 두 번째 문장을 완성하세요.</div>
+              </button>
+              <button
+                onClick={startWrongToefl}
+                disabled={toeflWrongIds.length === 0}
+                className="w-full text-left px-5 py-4 rounded-xl border-2 border-red-200 bg-white hover:border-red-400 hover:bg-red-50 transition-all disabled:opacity-40"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-800">틀린 문제 다시 풀기</span>
+                  <span className="text-sm font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
+                    {toeflWrongIds.length}문제
+                  </span>
+                </div>
+                <div className="text-sm text-slate-500 mt-0.5">틀렸던 TOEFL 문제를 다시 연습해요.</div>
+              </button>
+            </div>
+          </>
+        ) : (
+          /* ── Normal mode select ──────────────────────────── */
+          <>
         <div className="flex items-center gap-2 mb-2">
           <h2 className="text-2xl font-bold text-slate-800">게임 모드 선택</h2>
           {settings.sentenceMode === 'ai' && (
@@ -775,6 +865,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
           <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-500 text-sm">
             데이터를 불러오는 중...
           </div>
+        )}
+          </>
         )}
       </div>
     )

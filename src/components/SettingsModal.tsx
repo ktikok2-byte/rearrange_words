@@ -157,6 +157,27 @@ export default function SettingsModal({ onClose }: Props) {
             </div>
             <div className="border-t border-slate-100" />
             <div>
+              <div className="font-medium text-slate-800 text-sm mb-1">게임 모드</div>
+              <div className="text-xs text-slate-500 mb-2">TOEFL 모드에서는 틀린 문제가 TOEFL 기록 기준으로 표시됩니다.</div>
+              <div className="flex gap-2">
+                {(['normal', 'toefl'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => updateSetting('gameMode', m)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium border-2 transition-colors
+                      ${settings.gameMode === m
+                        ? m === 'toefl'
+                          ? 'border-orange-500 bg-orange-50 text-orange-700'
+                          : 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-slate-200 text-slate-600 hover:border-slate-300'}`}
+                  >
+                    {m === 'normal' ? '일반' : 'TOEFL'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="border-t border-slate-100" />
+            <div>
               <div className="font-medium text-slate-800 text-sm mb-1">문장 출처</div>
               <div className="text-xs text-slate-500 mb-2">AI 모드는 Groq API 키가 필요합니다.</div>
               <div className="flex gap-2">
