@@ -81,6 +81,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [ready, setReady]         = useState(false)
   const [aiError, setAiError]     = useState<string | null>(null)
 
+  // AI sentence prefetch
+  const prefetchingAiRef    = useRef(false)
+  const [prefetchedAi, setPrefetchedAi] = useState<Sentence | null>(null)
+
   // TOEFL state
   const toeflContextRef  = useRef<'new' | 'wrong'>('new')
   const toeflWrongCatRef = useRef<ReviewCategory | null>(null) // null = all categories
@@ -178,7 +182,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }, [userId, profile.username])
 
   // ── Launch sentence ───────────────────────────────────────
-  const launchSentence = (sentence: Sentence, _level: number, _selectedMode: GameMode) => {
+  const launchSentence = useCallback((sentence: Sentence, _level: number, _selectedMode: GameMode) => {
     const words   = tokenize(sentence.target_text)
     const shuffled = shuffleArray(words)
     setCurrentSentence(sentence)
@@ -195,7 +199,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setStartTime(useStart ? null : new Date())
     setLastResult(null)
     setPhase('playing')
-  }
+  }, [settings.useStartButton, settings.secondsPerWord])
 
   const handleStartTimer = () => {
     setReady(false)
@@ -224,6 +228,14 @@ export default function GameClient({ userId, initialProfile }: Props) {
       return { sentence: null, error: String(e) }
     }
   }, [profile.current_level])
+
+  const prefetchNextAiSentence = useCallback(async () => {
+    if (prefetchingAiRef.current) return
+    prefetchingAiRef.current = true
+    const { sentence } = await fetchAiSentence()
+    prefetchingAiRef.current = false
+    if (sentence) setPrefetchedAi(sentence)
+  }, [fetchAiSentence])
 
   // ── TOEFL ─────────────────────────────────────────────────
   const fetchToeflExercise = useCallback(async (): Promise<{ exercise: ToeflExercise | null; error?: string }> => {
@@ -368,13 +380,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setMode(selectedMode)
     setLevelUpMsg(null)
 
-    // AI mode: generate a new sentence via Groq API
+    // AI mode: use prefetched sentence if ready, otherwise fetch now
     if (settings.sentenceMode === 'ai' && selectedMode === 'unsolved') {
       setAiError(null)
+      if (prefetchedAi) {
+        const sentence = prefetchedAi
+        setPrefetchedAi(null)
+        launchSentence(sentence, profile.current_level, selectedMode)
+        prefetchNextAiSentence()
+        return
+      }
       setPhase('ai-loading')
       const { sentence, error } = await fetchAiSentence()
       if (sentence) {
         launchSentence(sentence, profile.current_level, selectedMode)
+        prefetchNextAiSentence()
       } else {
         setAiError(`AI 문장 생성 실패: ${error ?? '알 수 없는 오류'}`)
         setPhase('mode-select')
@@ -431,7 +451,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
       if (!sentence) { setPhase('mode-select'); return }
       launchSentence(sentence, profile.current_level, selectedMode)
     }
-  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase, fetchAiSentence, settings.sentenceMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase, fetchAiSentence, prefetchedAi, prefetchNextAiSentence, settings.sentenceMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
