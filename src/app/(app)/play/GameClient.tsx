@@ -83,21 +83,22 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // TOEFL state
   const toeflContextRef  = useRef<'new' | 'wrong'>('new')
-  const prefetchingRef   = useRef(false) // prevents duplicate background fetches
+  const toeflWrongCatRef = useRef<ReviewCategory | null>(null) // null = all categories
+  const prefetchingRef   = useRef(false)
   const [prefetchedToefl, setPrefetchedToefl] = useState<ToeflExercise | null>(null)
   const [currentToefl, setCurrentToefl]       = useState<ToeflExercise | null>(null)
-  const [toeflResult, setToeflResult]       = useState<{
+  const [toeflResult, setToeflResult]         = useState<{
     isCorrect: boolean
     timeTakenMs: number | null
     correctAnswer: string
     korean: string
     sentence1: string
   } | null>(null)
-  // exerciseId → latest attempt: { isCorrect, attemptedAt }
-  const [toeflStatuses, setToeflStatuses]   = useState<Record<number, { isCorrect: boolean; attemptedAt: string }>>({})
-  const toeflWrongIds = Object.entries(toeflStatuses)
-    .filter(([, v]) => !v.isCorrect)
-    .map(([id]) => Number(id))
+  // exerciseId → { isCorrect (latest), attemptedAt (latest), lastWrongAt }
+  const [toeflStatuses, setToeflStatuses] = useState<Record<number, {
+    isCorrect: boolean; attemptedAt: string; lastWrongAt: string | null
+  }>>({})
+  const [resetOpen, setResetOpen] = useState<ReviewCategory | null>(null)
 
   // Track direction of last level change for bidirectional skip
   const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
@@ -129,9 +130,19 @@ export default function GameClient({ userId, initialProfile }: Props) {
         .eq('user_id', userId)
         .order('attempted_at', { ascending: true })
 
-      const toeflMap: Record<number, { isCorrect: boolean; attemptedAt: string }> = {}
+      const latestAttempt: Record<number, { isCorrect: boolean; attemptedAt: string }> = {}
+      const lastWrongMap: Record<number, string> = {}
       toeflRows?.forEach(r => {
-        toeflMap[r.exercise_id] = { isCorrect: r.is_correct, attemptedAt: r.attempted_at }
+        if (!latestAttempt[r.exercise_id] || r.attempted_at > latestAttempt[r.exercise_id].attemptedAt) {
+          latestAttempt[r.exercise_id] = { isCorrect: r.is_correct, attemptedAt: r.attempted_at }
+        }
+        if (!r.is_correct && (!lastWrongMap[r.exercise_id] || r.attempted_at > lastWrongMap[r.exercise_id])) {
+          lastWrongMap[r.exercise_id] = r.attempted_at
+        }
+      })
+      const toeflMap: Record<number, { isCorrect: boolean; attemptedAt: string; lastWrongAt: string | null }> = {}
+      Object.entries(latestAttempt).forEach(([id, v]) => {
+        toeflMap[Number(id)] = { ...v, lastWrongAt: lastWrongMap[Number(id)] ?? null }
       })
       setToeflStatuses(toeflMap)
     }
@@ -276,23 +287,44 @@ export default function GameClient({ userId, initialProfile }: Props) {
     launchToeflExercise(exercise)
   }, [prefetchedToefl, fetchToeflExercise, launchToeflExercise])
 
-  const startWrongToefl = useCallback(async () => {
-    if (toeflWrongIds.length === 0) { setPhase('mode-select'); return }
+  const startToeflReview = useCallback(async (cat: ReviewCategory | null) => {
     toeflContextRef.current = 'wrong'
-    const randomId = toeflWrongIds[Math.floor(Math.random() * toeflWrongIds.length)]
+    toeflWrongCatRef.current = cat
+    const now = new Date()
+    const ids = Object.entries(toeflStatuses)
+      .filter(([, v]) => {
+        if (v.isCorrect || !v.lastWrongAt) return false
+        if (!cat) return true
+        return computeReviewCategory(new Date(v.lastWrongAt), now) === cat
+      })
+      .map(([id]) => Number(id))
+    if (ids.length === 0) { setPhase('mode-select'); return }
+    const randomId = ids[Math.floor(Math.random() * ids.length)]
     setPhase('toefl-loading')
     const { data: exercise, error } = await supabase
       .from('toefl_exercises')
       .select('*')
       .eq('id', randomId)
       .single()
-    if (error || !exercise) {
-      setAiError('TOEFL 문제를 불러오지 못했습니다.')
-      setPhase('mode-select')
-      return
-    }
+    if (error || !exercise) { setAiError('TOEFL 문제를 불러오지 못했습니다.'); setPhase('mode-select'); return }
     launchToeflExercise(exercise as ToeflExercise)
-  }, [toeflWrongIds, supabase, launchToeflExercise])
+  }, [toeflStatuses, supabase, launchToeflExercise])
+
+  const resetToeflCategory = useCallback(async (cat: ReviewCategory) => {
+    const now = new Date()
+    const idsToReset = Object.entries(toeflStatuses)
+      .filter(([, v]) => !v.isCorrect && !!v.lastWrongAt && computeReviewCategory(new Date(v.lastWrongAt), now) === cat)
+      .map(([id]) => Number(id))
+    if (idsToReset.length > 0) {
+      await supabase.from('user_toefl_status').delete().eq('user_id', userId).in('exercise_id', idsToReset)
+      setToeflStatuses(prev => {
+        const next = { ...prev }
+        idsToReset.forEach(id => { delete next[id] })
+        return next
+      })
+    }
+    setResetOpen(null)
+  }, [toeflStatuses, userId, supabase])
 
   const submitToeflAnswer = useCallback(async (answer: string[]) => {
     if (!currentToefl || !startTime || submittingRef.current) return
@@ -315,10 +347,11 @@ export default function GameClient({ userId, initialProfile }: Props) {
     })
 
     // Update in-memory TOEFL status (latest attempt per exercise)
-    setToeflStatuses(prev => ({
-      ...prev,
-      [currentToefl.id]: { isCorrect, attemptedAt: now.toISOString() },
-    }))
+    setToeflStatuses(prev => {
+      const existing = prev[currentToefl.id]
+      const lastWrongAt = isCorrect ? (existing?.lastWrongAt ?? null) : now.toISOString()
+      return { ...prev, [currentToefl.id]: { isCorrect, attemptedAt: now.toISOString(), lastWrongAt } }
+    })
 
     setToeflResult({
       isCorrect,
@@ -580,7 +613,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={toeflContextRef.current === 'wrong' ? startWrongToefl : startToefl}
+            onClick={toeflContextRef.current === 'wrong' ? () => startToeflReview(toeflWrongCatRef.current) : startToefl}
             className="flex-1 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors">
             {toeflContextRef.current === 'wrong' ? '다음 틀린 문제' : '다음 문제'}
           </button>
@@ -781,19 +814,59 @@ export default function GameClient({ userId, initialProfile }: Props) {
                 </div>
                 <div className="text-sm text-slate-500 mt-0.5">연관된 두 문장 중 두 번째 문장을 완성하세요.</div>
               </button>
-              <button
-                onClick={startWrongToefl}
-                disabled={toeflWrongIds.length === 0}
-                className="w-full text-left px-5 py-4 rounded-xl border-2 border-red-200 bg-white hover:border-red-400 hover:bg-red-50 transition-all disabled:opacity-40"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-800">틀린 문제 다시 풀기</span>
-                  <span className="text-sm font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">
-                    {toeflWrongIds.length}문제
-                  </span>
-                </div>
-                <div className="text-sm text-slate-500 mt-0.5">틀렸던 TOEFL 문제를 다시 연습해요.</div>
-              </button>
+              {/* TOEFL wrong review by category */}
+              {(() => {
+                const now = new Date()
+                const cats: { cat: ReviewCategory; label: string }[] = [
+                  { cat: '24h', label: '24시간 이내 틀린 문제' },
+                  { cat: '1w',  label: '24시간~1주일 틀린 문제' },
+                  { cat: '3m',  label: '1주일~3개월 틀린 문제' },
+                  { cat: '1y',  label: '3개월~1년 틀린 문제' },
+                  { cat: 'old', label: '1년 이상 틀린 문제' },
+                ]
+                return cats.map(({ cat, label }) => {
+                  const count = Object.values(toeflStatuses).filter(v =>
+                    !v.isCorrect && !!v.lastWrongAt && computeReviewCategory(new Date(v.lastWrongAt), now) === cat
+                  ).length
+                  return (
+                    <div key={cat}>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => startToeflReview(cat)}
+                          disabled={count === 0}
+                          className="flex-1 text-left px-4 py-3 rounded-xl border-2 border-red-100 bg-white hover:border-red-400 hover:bg-red-50 transition-all disabled:opacity-40"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-medium text-slate-700 text-sm">{label}</span>
+                            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600">{count}문제</span>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => setResetOpen(resetOpen === cat ? null : cat)}
+                          disabled={count === 0}
+                          className="p-2 text-slate-400 hover:text-slate-600 disabled:opacity-30 text-base leading-none"
+                          title="이 그룹 초기화"
+                        >⚙</button>
+                      </div>
+                      {resetOpen === cat && (
+                        <div className="mt-1 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm">
+                          <p className="text-red-700 font-medium mb-2">이 그룹의 틀린 기록을 초기화할까요?</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => resetToeflCategory(cat)}
+                              className="flex-1 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition-colors"
+                            >초기화</button>
+                            <button
+                              onClick={() => setResetOpen(null)}
+                              className="flex-1 py-1.5 bg-white text-slate-600 text-xs font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                            >취소</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              })()}
             </div>
           </>
         ) : (
