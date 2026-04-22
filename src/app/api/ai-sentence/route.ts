@@ -29,10 +29,10 @@ export async function POST(req: NextRequest) {
         response_format: { type: 'json_object' }, // Forces strictly valid JSON
         messages: [{
           role: 'system',
-          content: 'You are an expert bilingual language teacher. Your goal is to create flawless Korean-English sentence pairs. The Korean must sound natural and conversational to a native speaker. The English must be grammatically perfect. Always return valid JSON.',
+          content: 'You are an expert bilingual language teacher. Your goal is to create flawless English-Korean sentence pairs. The English must sound natural, grammatically perfect and conversational to a native speaker. Always return valid JSON.',
         }, {
           role: 'user',
-          content: `Generate a natural Korean sentence and its grammatically perfect English translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"korean": "오늘 날씨가 정말 좋다.", "english": "The weather is very nice."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
+          content: `Generate a natural and grammatically perfect English sentence and its Korean translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"english": "The weather is very nice.", "korean": "오늘 날씨가 정말 좋다."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
         }],
         temperature: 0.9, // Lowered temperature to prevent grammar hallucinations
         max_tokens: 200,
