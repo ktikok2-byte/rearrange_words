@@ -1,18 +1,19 @@
-export const GROQ_MODEL   = 'llama-3.3-70b-versatile'
-export const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
+export const GROQ_MODEL      = 'llama-3.3-70b-versatile' // sentence generation + grammar check
+export const GROQ_MODEL_FAST = 'llama-3.1-8b-instant'   // topic generation (fast, light)
+export const GROQ_API_URL    = 'https://api.groq.com/openai/v1/chat/completions'
 
 export type GroqMessage = { role: 'system' | 'user' | 'assistant'; content: string }
 
 export async function callGroq(
   apiKey: string,
   messages: GroqMessage[],
-  opts: { temperature?: number; maxTokens?: number; jsonMode?: boolean } = {},
+  opts: { temperature?: number; maxTokens?: number; jsonMode?: boolean; model?: string } = {},
 ): Promise<string> {
   const res = await fetch(GROQ_API_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model:      GROQ_MODEL,
+      model:       opts.model ?? GROQ_MODEL,
       messages,
       temperature: opts.temperature ?? 0.5,
       max_tokens:  opts.maxTokens  ?? 300,

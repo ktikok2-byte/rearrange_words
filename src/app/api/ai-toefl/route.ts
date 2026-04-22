@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { callGroq, checkEnglishGrammar } from '@/lib/groq'
+import { generateUniqueTopic } from '@/lib/topics'
 
 export const dynamic = 'force-dynamic'
-
-const TOPICS = [
-  'Astronomy and Space Exploration', 'Marine Biology', 'Ancient History',
-  'Geology and Earth Science', 'Human Psychology', 'Economics and Trade',
-  'Environmental Science', 'Art History', 'Chemistry', 'Botany',
-]
 
 export async function POST(_req: NextRequest) {
   try {
@@ -17,9 +12,15 @@ export async function POST(_req: NextRequest) {
       return NextResponse.json({ error: 'GROQ_API_KEY not set' }, { status: 503 })
     }
 
-    const randomTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)]
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
 
-    // 1. Generate
+    // 1. Generate unique topic (fast model)
+    const topic = await generateUniqueTopic(apiKey, supabase)
+
+    // 2. Generate exercise
     let content: string
     try {
       content = await callGroq(apiKey, [
@@ -29,7 +30,7 @@ export async function POST(_req: NextRequest) {
         },
         {
           role: 'user',
-          content: `Create two contextually connected English sentences about this specific academic topic: "${randomTopic}".
+          content: `Create two contextually connected English sentences about this specific topic: "${topic}".
 
 Rules:
 1. Both sentences must be exactly 7 to 10 words long.
@@ -59,18 +60,13 @@ Examples to follow strictly:
       return NextResponse.json({ error: 'Missing fields in AI response' }, { status: 502 })
     }
 
-    // 2. Grammar check
+    // 3. Grammar check
     const grammarOk = await checkEnglishGrammar(apiKey, parsed.sentence1, parsed.sentence2)
     if (!grammarOk) {
       return NextResponse.json({ error: '문법 오류 감지됨', retryable: true }, { status: 422 })
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    )
-
-    // 3. Duplicate check
+    // 4. Duplicate check
     const { data: dup } = await supabase
       .from('toefl_exercises')
       .select('id')
@@ -80,7 +76,7 @@ Examples to follow strictly:
       return NextResponse.json({ error: '이미 존재하는 문제', retryable: true }, { status: 422 })
     }
 
-    // 4. Insert
+    // 5. Insert
     const { data: exercise, error } = await supabase
       .from('toefl_exercises')
       .insert({

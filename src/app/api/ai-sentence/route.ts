@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getWordRangeForLevel } from '@/lib/game'
 import { callGroq, checkEnglishGrammar } from '@/lib/groq'
+import { generateUniqueTopic } from '@/lib/topics'
+
+const STRUCTURES = [
+  'a direct wh-question (wh-word + auxiliary + subject + verb, e.g. "Where did she go?")',
+  'a yes/no question (auxiliary + subject + verb, e.g. "Has he finished the report?")',
+  'a sentence containing an indirect question (e.g. "Do you know where he went?" or "I wonder if she arrived.")',
+  'a sentence with a noun that-clause or wh-clause (e.g. "She believes that climate change is urgent." or "What he said surprised everyone.")',
+  'an opinion or evaluation sentence using "I think", "I found", or "In my opinion"',
+  'a reported speech sentence (subject + said/asked/explained + that + subject + verb)',
+  'a sentence with a subject relative clause (e.g. "The scientist who discovered penicillin changed medicine.")',
+  'a sentence with an object relative clause (e.g. "The book that she recommended was fascinating.")',
+  'a sentence using present perfect or past perfect tense to show time contrast',
+  'a sentence in passive voice (e.g. "The report was submitted by the committee.")',
+  'a comparison sentence using comparative + than, or too/enough/much more (e.g. "This method is far more efficient than the old one.")',
+  'a sentence with a frequency, degree, manner, or time adverb in a notable position (e.g. "Rarely do scientists agree on everything.")',
+]
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,22 +31,37 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'GROQ_API_KEY not set' }, { status: 503 })
     }
 
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    )
+
     const [minWords, maxWords] = getWordRangeForLevel(level)
     const targetWords = Math.floor(Math.random() * (maxWords - minWords + 1)) + minWords
+    const structure   = STRUCTURES[Math.floor(Math.random() * STRUCTURES.length)]
 
-    // 1. Generate
+    // 1. Generate unique topic (fast model)
+    const topic = await generateUniqueTopic(apiKey, supabase)
+
+    // 2. Generate sentence
     let content: string
     try {
       content = await callGroq(apiKey, [
         {
           role: 'system',
-          content: 'You are an expert bilingual language teacher. Your goal is to create flawless English-Korean sentence pairs. The English must sound natural, grammatically perfect and conversational to a native speaker. Always return valid JSON.',
+          content: 'You are an expert bilingual language teacher. Create a flawless English sentence and its natural Korean translation. The English must be grammatically perfect and sound like a native speaker. Always return valid JSON.',
         },
         {
           role: 'user',
-          content: `Generate a natural and grammatically perfect English sentence and its Korean translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"english": "The weather is very nice.", "korean": "오늘 날씨가 정말 좋다."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
+          content: `Topic: "${topic}"
+Sentence structure: ${structure}
+Word count: the English sentence must contain exactly ${targetWords} words.
+
+Write the sentence strictly following the given structure about the given topic.
+The "korean" field MUST contain actual Korean characters (한글).
+Return ONLY: {"english": "...", "korean": "..."}`,
         },
-      ], { temperature: 0.9, maxTokens: 200, jsonMode: true })
+      ], { temperature: 0.7, maxTokens: 200, jsonMode: true })
     } catch (e) {
       console.error('Groq generate error:', e)
       return NextResponse.json({ error: 'AI API error' }, { status: 502 })
@@ -48,18 +79,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '필드 누락', retryable: true }, { status: 422 })
     }
 
-    // 2. Grammar check
+    // 3. Grammar check
     const grammarOk = await checkEnglishGrammar(apiKey, english)
     if (!grammarOk) {
       return NextResponse.json({ error: '문법 오류 감지됨', retryable: true }, { status: 422 })
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    )
-
-    // 3. Duplicate check
+    // 4. Duplicate check
     const { data: dup } = await supabase
       .from('sentences')
       .select('id')
@@ -69,7 +95,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '이미 존재하는 문장', retryable: true }, { status: 422 })
     }
 
-    // 4. Insert
+    // 5. Insert
     const { data: sentence, error } = await supabase
       .from('sentences')
       .insert({
