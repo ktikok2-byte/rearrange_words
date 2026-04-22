@@ -25,15 +25,16 @@ export async function POST(req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
+        model: 'llama-3.3-70b-versatile', // Upgraded to a smarter model
+        response_format: { type: 'json_object' }, // Forces strictly valid JSON
         messages: [{
           role: 'system',
-          content: 'You are a language teacher who creates Korean-English sentence pairs for vocabulary practice. Always respond with valid JSON only, no markdown or extra text.',
+          content: 'You are an expert bilingual language teacher. Your goal is to create flawless Korean-English sentence pairs. The Korean must sound natural and conversational to a native speaker. The English must be grammatically perfect. Always return valid JSON.',
         }, {
           role: 'user',
-          content: `Create a natural Korean sentence and its English translation. The English sentence must have exactly ${targetWords} words. Return only this JSON: {"korean": "...", "english": "..."}`,
+          content: `Generate a natural Korean sentence and its grammatically perfect English translation. The English sentence must contain exactly ${targetWords} words. Return ONLY a JSON object with exactly these keys: {"korean": "...", "english": "..."}`,
         }],
-        temperature: 0.9,
+        temperature: 0.5, // Lowered temperature to prevent grammar hallucinations
         max_tokens: 200,
       }),
     })

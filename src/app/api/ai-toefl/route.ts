@@ -15,22 +15,25 @@ export async function POST(_req: NextRequest) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'llama-3.1-8b-instant',
+        model: 'llama-3.3-70b-versatile', // Upgraded to a much smarter free model on Groq
+        response_format: { type: 'json_object' }, // Enforce Groq's native JSON mode
         messages: [{
           role: 'system',
-          content: 'You are a TOEFL writing teacher. Create contextually connected English sentence pairs on the same specific topic. Always respond with valid JSON only, no markdown or extra text.',
+          content: 'You are an expert bilingual TOEFL writing teacher. Generate grammatically flawless English sentences and highly natural, accurate Korean translations. Return ONLY valid JSON.',
         }, {
           role: 'user',
-          content: `Create two English sentences about the SAME specific topic (they must be contextually connected, like consecutive sentences in a paragraph). Both sentences must be 7-10 words each. Also provide a Korean translation of sentence 2 only, and ONE dummy English word that does not fit in sentence 2.
+          content: `Create two contextually connected English sentences about a specific academic topic. 
 
 Rules:
-- sentence1 and sentence2 must share the same topic/subject
-- sentence2 must be 7-10 words (count carefully)
-- dummy must be a real English word that clearly does NOT belong in sentence2
+1. Both sentences must be exactly 7-10 words long.
+2. Grammar must be at an advanced TOEFL level.
+3. Provide a perfect Korean translation for sentence 2.
+4. Provide ONE dummy English word completely irrelevant to sentence 2.
 
-Return ONLY this JSON: {"sentence1": "...", "sentence2": "...", "korean": "...", "dummy": "..."}`,
+Example format to follow strictly:
+{"sentence1": "Photosynthesis requires sunlight to convert water into energy.", "sentence2": "This complex process sustains almost all earthly lifeforms.", "korean": "이 복잡한 과정은 거의 모든 지구 생명체를 유지합니다.", "dummy": "laptop"}`,
         }],
-        temperature: 0.85,
+        temperature: 0.7, // Lowered for better grammatical stability and logic
         max_tokens: 300,
       }),
     })
