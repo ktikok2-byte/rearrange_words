@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { callGroq, checkEnglishGrammar } from '@/lib/groq'
 
-export const dynamic = 'force-dynamic' // Next.js 캐싱 방지
+export const dynamic = 'force-dynamic'
+
+const TOPICS = [
+  'Astronomy and Space Exploration', 'Marine Biology', 'Ancient History',
+  'Geology and Earth Science', 'Human Psychology', 'Economics and Trade',
+  'Environmental Science', 'Art History', 'Chemistry', 'Botany',
+]
 
 export async function POST(_req: NextRequest) {
   try {
@@ -10,29 +17,19 @@ export async function POST(_req: NextRequest) {
       return NextResponse.json({ error: 'GROQ_API_KEY not set' }, { status: 503 })
     }
 
-    // 랜덤 주제 배열 추가
-    const topics = [
-      "Astronomy and Space Exploration", "Marine Biology", "Ancient History",
-      "Geology and Earth Science", "Human Psychology", "Economics and Trade",
-      "Environmental Science", "Art History", "Chemistry", "Botany"
-    ]
-    const randomTopic = topics[Math.floor(Math.random() * topics.length)]
+    const randomTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)]
 
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile', // Upgraded to a much smarter free model on Groq
-        response_format: { type: 'json_object' }, // Enforce Groq's native JSON mode
-        messages: [{
+    // 1. Generate
+    let content: string
+    try {
+      content = await callGroq(apiKey, [
+        {
           role: 'system',
           content: 'You are an expert bilingual TOEFL writing teacher. Generate grammatically flawless English sentences and highly natural, accurate Korean translations. Return ONLY valid JSON.',
-        }, {
+        },
+        {
           role: 'user',
-          content: `Create two contextually connected English sentences about this specific academic topic: "${randomTopic}". 
+          content: `Create two contextually connected English sentences about this specific academic topic: "${randomTopic}".
 
 Rules:
 1. Both sentences must be exactly 7 to 10 words long.
@@ -44,31 +41,17 @@ Examples to follow strictly:
 {"sentence1": "Photosynthesis requires sunlight to convert water into energy.", "sentence2": "This complex process sustains almost all earthly lifeforms.", "korean": "광합성은 물을 에너지로 변환하기 위해 햇빛을 필요로 합니다. 이 복잡한 과정은 거의 모든 지구 생명체를 유지합니다.", "dummy": "sustaining"}
 {"sentence1": "Many ancient civilizations built massive stone pyramids.", "sentence2": "These incredible structures served as tombs for rulers.", "korean": "많은 고대 문명들은 거대한 돌 피라미드를 건설했습니다. 이 놀라운 구조물들은 통치자들을 위한 무덤 역할을 했습니다.", "dummy": "serving"}
 {"sentence1": "Economic inflation decreases the purchasing power of currency.", "sentence2": "Consequently, everyday goods become much more expensive.", "korean": "경제적 인플레이션은 통화의 구매력을 감소시킵니다. 결과적으로 일상적인 상품들은 훨씬 더 비싸집니다.", "dummy": "becoming"}`,
-        }],
-        temperature: 0.9, // Lowered significantly for strict grammatical accuracy and predictable output
-        max_tokens: 300,
-      }),
-    })
-
-    if (!groqRes.ok) {
-      const err = await groqRes.text()
-      console.error('Groq error:', err)
+        },
+      ], { temperature: 0.9, maxTokens: 300, jsonMode: true })
+    } catch (e) {
+      console.error('Groq TOEFL generate error:', e)
       return NextResponse.json({ error: 'AI API error' }, { status: 502 })
     }
 
-    const groqData = await groqRes.json()
-    const content = groqData.choices?.[0]?.message?.content ?? ''
-
-    let parsed;
+    let parsed: { sentence1?: string; sentence2?: string; korean?: string; dummy?: string }
     try {
-      parsed = JSON.parse(content) as {
-        sentence1?: string
-        sentence2?: string
-        korean?: string
-        dummy?: string
-      }
-    } catch (err) {
-      console.error('JSON parse error:', err)
+      parsed = JSON.parse(content)
+    } catch {
       return NextResponse.json({ error: 'Invalid AI response format' }, { status: 502 })
     }
 
@@ -76,13 +59,28 @@ Examples to follow strictly:
       return NextResponse.json({ error: 'Missing fields in AI response' }, { status: 502 })
     }
 
-    const wordCount2 = parsed.sentence2.trim().split(/\s+/).length
+    // 2. Grammar check
+    const grammarOk = await checkEnglishGrammar(apiKey, parsed.sentence1, parsed.sentence2)
+    if (!grammarOk) {
+      return NextResponse.json({ error: '문법 오류 감지됨', retryable: true }, { status: 422 })
+    }
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     )
 
+    // 3. Duplicate check
+    const { data: dup } = await supabase
+      .from('toefl_exercises')
+      .select('id')
+      .eq('sentence2_en', parsed.sentence2.trim())
+      .maybeSingle()
+    if (dup) {
+      return NextResponse.json({ error: '이미 존재하는 문제', retryable: true }, { status: 422 })
+    }
+
+    // 4. Insert
     const { data: exercise, error } = await supabase
       .from('toefl_exercises')
       .insert({
@@ -90,13 +88,13 @@ Examples to follow strictly:
         sentence2_en: parsed.sentence2.trim(),
         korean:       parsed.korean.trim(),
         dummy_word:   parsed.dummy.trim(),
-        word_count2:  wordCount2,
+        word_count2:  parsed.sentence2.trim().split(/\s+/).length,
       })
       .select()
       .single()
 
     if (error) {
-      console.error('Supabase insert error:', error)
+      console.error('Supabase TOEFL insert error:', error)
       return NextResponse.json({ error: 'DB insert failed' }, { status: 500 })
     }
 

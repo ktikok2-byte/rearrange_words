@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { getWordRangeForLevel } from '@/lib/game'
+import { callGroq, checkEnglishGrammar } from '@/lib/groq'
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,61 +18,58 @@ export async function POST(req: NextRequest) {
     const [minWords, maxWords] = getWordRangeForLevel(level)
     const targetWords = Math.floor(Math.random() * (maxWords - minWords + 1)) + minWords
 
-    // Call Groq API (OpenAI-compatible, free tier)
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile', // Upgraded to a smarter model
-        response_format: { type: 'json_object' }, // Forces strictly valid JSON
-        messages: [{
+    // 1. Generate
+    let content: string
+    try {
+      content = await callGroq(apiKey, [
+        {
           role: 'system',
           content: 'You are an expert bilingual language teacher. Your goal is to create flawless English-Korean sentence pairs. The English must sound natural, grammatically perfect and conversational to a native speaker. Always return valid JSON.',
-        }, {
+        },
+        {
           role: 'user',
           content: `Generate a natural and grammatically perfect English sentence and its Korean translation. The English sentence must contain exactly ${targetWords} words. The "korean" field MUST contain actual Korean characters (한글). Example format: {"english": "The weather is very nice.", "korean": "오늘 날씨가 정말 좋다."}. Now generate a NEW sentence about a DIFFERENT topic. Return ONLY the JSON object.`,
-        }],
-        temperature: 0.9, // Lowered temperature to prevent grammar hallucinations
-        max_tokens: 200,
-      }),
-    })
-
-    if (!groqRes.ok) {
-      const err = await groqRes.text()
-      console.error('Groq error:', err)
+        },
+      ], { temperature: 0.9, maxTokens: 200, jsonMode: true })
+    } catch (e) {
+      console.error('Groq generate error:', e)
       return NextResponse.json({ error: 'AI API error' }, { status: 502 })
     }
 
-    const groqData = await groqRes.json()
-    const content = groqData.choices?.[0]?.message?.content ?? ''
-
-    // Extract JSON from response (LLM may include extra text)
     const jsonMatch = content.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      return NextResponse.json({ error: 'Invalid AI response' }, { status: 502 })
-    }
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+    if (!jsonMatch) return NextResponse.json({ error: 'Invalid AI response' }, { status: 502 })
 
-    // Accept common key-name variations the model sometimes uses
-    const korean = (parsed.korean || parsed.Korean || parsed.korean_sentence || parsed.korean_text) as string | undefined
+    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+    const korean  = (parsed.korean  || parsed.Korean  || parsed.korean_sentence  || parsed.korean_text)  as string | undefined
     const english = (parsed.english || parsed.English || parsed.english_sentence || parsed.english_text) as string | undefined
 
     if (!korean || !english) {
-      console.error('Missing fields in AI response. Got:', JSON.stringify(parsed))
-      return NextResponse.json({ error: 'Missing fields in AI response' }, { status: 502 })
+      console.error('Missing fields. Got:', JSON.stringify(parsed))
+      return NextResponse.json({ error: '필드 누락', retryable: true }, { status: 422 })
     }
 
-    const actualWordCount = english.trim().split(/\s+/).length
+    // 2. Grammar check
+    const grammarOk = await checkEnglishGrammar(apiKey, english)
+    if (!grammarOk) {
+      return NextResponse.json({ error: '문법 오류 감지됨', retryable: true }, { status: 422 })
+    }
 
-    // Save to DB using service role (bypasses RLS for sentence insertion)
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
     )
 
+    // 3. Duplicate check
+    const { data: dup } = await supabase
+      .from('sentences')
+      .select('id')
+      .eq('target_text', english.trim())
+      .maybeSingle()
+    if (dup) {
+      return NextResponse.json({ error: '이미 존재하는 문장', retryable: true }, { status: 422 })
+    }
+
+    // 4. Insert
     const { data: sentence, error } = await supabase
       .from('sentences')
       .insert({
@@ -79,7 +77,7 @@ export async function POST(req: NextRequest) {
         source_text:      korean.trim(),
         target_language:  'en',
         target_text:      english.trim(),
-        word_count:       actualWordCount,
+        word_count:       english.trim().split(/\s+/).length,
         difficulty_level: level,
         language_pair:    'ko-en',
         source:           'ai',

@@ -80,6 +80,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [levelUpMsg, setLevelUpMsg] = useState<string | null>(null)
   const [ready, setReady]         = useState(false)
   const [aiError, setAiError]     = useState<string | null>(null)
+  const [aiAttempt, setAiAttempt]       = useState(1)
+  const [toeflAttempt, setToeflAttempt] = useState(1)
 
   // AI sentence prefetch
   const prefetchingAiRef    = useRef(false)
@@ -208,7 +210,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }
 
   // ── AI sentence fetch ─────────────────────────────────────
-  const fetchAiSentence = useCallback(async (): Promise<{ sentence: Sentence | null; error?: string }> => {
+  const fetchAiSentenceOnce = useCallback(async (): Promise<{ sentence: Sentence | null; retryable?: boolean; error?: string }> => {
     try {
       const res = await fetch('/api/ai-sentence', {
         method: 'POST',
@@ -216,14 +218,11 @@ export default function GameClient({ userId, initialProfile }: Props) {
         body: JSON.stringify({ level: profile.current_level }),
       })
       const json = await res.json()
-      if (!res.ok) {
-        return { sentence: null, error: json.error ?? `HTTP ${res.status}` }
-      }
-      if (json.sentence) {
+      if (res.ok && json.sentence) {
         setSentences(prev => [...prev, json.sentence])
         return { sentence: json.sentence }
       }
-      return { sentence: null, error: 'Empty response from AI' }
+      return { sentence: null, retryable: json.retryable ?? false, error: json.error ?? `HTTP ${res.status}` }
     } catch (e) {
       return { sentence: null, error: String(e) }
     }
@@ -232,32 +231,42 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const prefetchNextAiSentence = useCallback(async () => {
     if (prefetchingAiRef.current) return
     prefetchingAiRef.current = true
-    const { sentence } = await fetchAiSentence()
+    let attempt = 0, sentence: Sentence | null = null
+    while (!sentence && attempt < 5) {
+      attempt++
+      const result = await fetchAiSentenceOnce()
+      if (result.sentence) { sentence = result.sentence }
+      else if (!result.retryable) break
+    }
     prefetchingAiRef.current = false
     if (sentence) setPrefetchedAi(sentence)
-  }, [fetchAiSentence])
+  }, [fetchAiSentenceOnce])
 
   // ── TOEFL ─────────────────────────────────────────────────
-  const fetchToeflExercise = useCallback(async (): Promise<{ exercise: ToeflExercise | null; error?: string }> => {
+  const fetchToeflExerciseOnce = useCallback(async (): Promise<{ exercise: ToeflExercise | null; retryable?: boolean; error?: string }> => {
     try {
       const res = await fetch('/api/ai-toefl', { method: 'POST' })
       const json = await res.json()
-      if (!res.ok) return { exercise: null, error: json.error ?? `HTTP ${res.status}` }
-      if (json.exercise) return { exercise: json.exercise }
-      return { exercise: null, error: 'Empty response from AI' }
+      if (res.ok && json.exercise) return { exercise: json.exercise }
+      return { exercise: null, retryable: json.retryable ?? false, error: json.error ?? `HTTP ${res.status}` }
     } catch (e) {
       return { exercise: null, error: String(e) }
     }
   }, [])
 
-  // Fetches the next exercise in the background while the user is solving the current one
   const prefetchNextToefl = useCallback(async () => {
     if (prefetchingRef.current) return
     prefetchingRef.current = true
-    const { exercise } = await fetchToeflExercise()
+    let attempt = 0, exercise: ToeflExercise | null = null
+    while (!exercise && attempt < 5) {
+      attempt++
+      const result = await fetchToeflExerciseOnce()
+      if (result.exercise) { exercise = result.exercise }
+      else if (!result.retryable) break
+    }
     prefetchingRef.current = false
     if (exercise) setPrefetchedToefl(exercise)
-  }, [fetchToeflExercise])
+  }, [fetchToeflExerciseOnce])
 
   const launchToeflExercise = useCallback((exercise: ToeflExercise) => {
     setCurrentToefl(exercise)
@@ -288,16 +297,22 @@ export default function GameClient({ userId, initialProfile }: Props) {
       launchToeflExercise(exercise)
       return
     }
-    // First time (no prefetch yet): show loading and fetch
+    // First time (no prefetch yet): show loading with retry loop
     setPhase('toefl-loading')
-    const { exercise, error } = await fetchToeflExercise()
-    if (!exercise) {
-      setAiError(`TOEFL 문제 생성 실패: ${error ?? '알 수 없는 오류'}`)
-      setPhase('mode-select')
-      return
+    setToeflAttempt(1)
+    let tAttempt = 0
+    while (true) {
+      tAttempt++
+      if (tAttempt > 1) setToeflAttempt(tAttempt)
+      const { exercise, retryable, error } = await fetchToeflExerciseOnce()
+      if (exercise) { launchToeflExercise(exercise); return }
+      if (!retryable) {
+        setAiError(`TOEFL 문제 생성 실패: ${error ?? '알 수 없는 오류'}`)
+        setPhase('mode-select')
+        return
+      }
     }
-    launchToeflExercise(exercise)
-  }, [prefetchedToefl, fetchToeflExercise, launchToeflExercise])
+  }, [prefetchedToefl, fetchToeflExerciseOnce, launchToeflExercise])
 
   const startToeflReview = useCallback(async (cat: ReviewCategory | null) => {
     toeflContextRef.current = 'wrong'
@@ -391,13 +406,22 @@ export default function GameClient({ userId, initialProfile }: Props) {
         return
       }
       setPhase('ai-loading')
-      const { sentence, error } = await fetchAiSentence()
-      if (sentence) {
-        launchSentence(sentence, profile.current_level, selectedMode)
-        prefetchNextAiSentence()
-      } else {
-        setAiError(`AI 문장 생성 실패: ${error ?? '알 수 없는 오류'}`)
-        setPhase('mode-select')
+      setAiAttempt(1)
+      let aAttempt = 0
+      while (true) {
+        aAttempt++
+        if (aAttempt > 1) setAiAttempt(aAttempt)
+        const { sentence, retryable, error } = await fetchAiSentenceOnce()
+        if (sentence) {
+          launchSentence(sentence, profile.current_level, selectedMode)
+          prefetchNextAiSentence()
+          break
+        }
+        if (!retryable) {
+          setAiError(`AI 문장 생성 실패: ${error ?? '알 수 없는 오류'}`)
+          setPhase('mode-select')
+          break
+        }
       }
       return
     }
@@ -451,7 +475,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
       if (!sentence) { setPhase('mode-select'); return }
       launchSentence(sentence, profile.current_level, selectedMode)
     }
-  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase, fetchAiSentence, prefetchedAi, prefetchNextAiSentence, settings.sentenceMode]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sentences, userStatuses, reviewCategories, profile, userId, pickNextSentence, triggerRefill, supabase, fetchAiSentenceOnce, prefetchedAi, prefetchNextAiSentence, settings.sentenceMode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
@@ -596,7 +620,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
       <div className="max-w-lg mx-auto text-center py-20 space-y-4">
         <div className="text-4xl animate-spin inline-block">🤖</div>
         <p className="text-slate-700 font-semibold">TOEFL 문제를 만들고 있어요...</p>
-        <p className="text-slate-400 text-sm">잠시만 기다려주세요.</p>
+        <p className="text-slate-400 text-sm">
+          {toeflAttempt > 1 ? `문법 검증 후 재생성 중... (${toeflAttempt}번째 시도)` : '잠시만 기다려주세요.'}
+        </p>
       </div>
     )
   }
@@ -732,7 +758,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
       <div className="max-w-lg mx-auto text-center py-20 space-y-4">
         <div className="text-4xl animate-spin inline-block">🤖</div>
         <p className="text-slate-700 font-semibold">AI가 문제를 만들고 있어요...</p>
-        <p className="text-slate-400 text-sm">잠시만 기다려주세요.</p>
+        <p className="text-slate-400 text-sm">
+          {aiAttempt > 1 ? `문법 검증 후 재생성 중... (${aiAttempt}번째 시도)` : '잠시만 기다려주세요.'}
+        </p>
       </div>
     )
   }
