@@ -256,7 +256,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
   }, [fetchToeflExercise, launchToeflExercise])
 
   const startWrongToefl = useCallback(async () => {
-    if (toeflWrongIds.length === 0) return
+    if (toeflWrongIds.length === 0) { setPhase('mode-select'); return }
     toeflContextRef.current = 'wrong'
     const randomId = toeflWrongIds[Math.floor(Math.random() * toeflWrongIds.length)]
     setPhase('toefl-loading')
