@@ -15,6 +15,7 @@ const STRUCTURES = [
   'a sentence in passive voice (e.g. "The report was submitted by the committee.")',
   'a comparison sentence using comparative + than, or too/enough/much more (e.g. "This method is far more efficient than the old one.")',
   'a sentence with a frequency, degree, manner, or time adverb in a notable position (e.g. "Rarely do scientists agree on everything.")',
+  'random'
 ]
 
 export function pickRandomStructure(): string {

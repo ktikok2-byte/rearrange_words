@@ -27,7 +27,7 @@ export async function POST(_req: NextRequest) {
       content = await callGroq(apiKey, [
         {
           role: 'system',
-          content: 'You are an expert bilingual TOEFL writing teacher. Generate grammatically flawless English sentences and highly natural, accurate Korean translations. Return ONLY valid JSON.',
+          content: 'You are an expert bilingual TOEFL writing teacher. Generate grammatically flawless, highly natural and accurate English sentences and its Korean translations. Return ONLY valid JSON.',
         },
         {
           role: 'user',
@@ -37,7 +37,7 @@ Rules:
 1. Both sentences must be exactly 7 to 10 words long.
 2. Sentence 2 MUST use this grammatical structure: ${structure}
 3. The English MUST be perfectly natural, idiomatic, and grammatically flawless. Do NOT use awkward phrasing just to meet the word count.
-4. Provide perfect Korean translations for BOTH sentence 1 and sentence 2, combined together into a single string.
+4. Provide natural and accurate Korean translations for BOTH sentence 1 and sentence 2, combined together into a single string.
 5. Provide ONE dummy English word that acts as a plausible distractor. It must be semantically related to the topic, but strictly grammatically incorrect to use anywhere in sentence 2.
 
 Examples to follow strictly:
