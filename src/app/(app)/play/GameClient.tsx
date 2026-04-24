@@ -198,7 +198,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setAnswerEntries([])
     setUsedIndices(new Set())
     submittingRef.current = false
-    const secs = Math.round(words.length * settings.secondsPerWord * 10) / 10
+    const secs = Math.round(slots.length * settings.secondsPerWord * 10) / 10
     setTimerSeconds(secs)
 
     const useStart = settings.useStartButton
