@@ -90,8 +90,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [prefetchedAi, setPrefetchedAi] = useState<Sentence | null>(null)
 
   // TOEFL state
-  const toeflContextRef  = useRef<'new' | 'wrong'>('new')
-  const toeflWrongCatRef = useRef<ReviewCategory | null>(null) // null = all categories
+  const toeflContextRef    = useRef<'new' | 'wrong' | 'spaced'>('new')
+  const toeflWrongCatRef   = useRef<ReviewCategory | null>(null)
+  const toeflSpacedCatRef  = useRef<ReviewCategory>('24h')
   const prefetchingRef   = useRef(false)
   const [prefetchedToefl, setPrefetchedToefl] = useState<ToeflExercise | null>(null)
   const [currentToefl, setCurrentToefl]       = useState<ToeflExercise | null>(null)
@@ -106,7 +107,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [toeflStatuses, setToeflStatuses] = useState<Record<number, {
     isCorrect: boolean; attemptedAt: string; lastWrongAt: string | null
   }>>({})
-  const [resetOpen, setResetOpen] = useState<ReviewCategory | null>(null)
+  const [resetOpen, setResetOpen]   = useState<ReviewCategory | null>(null)
+  const [listOpen,  setListOpen]    = useState<ReviewCategory | null>(null)
+  const [listItems, setListItems]   = useState<ToeflExercise[]>([])
 
   // Track direction of last level change for bidirectional skip
   const lastLevelChangeRef = useRef<'up' | 'down' | null>(null)
@@ -218,7 +221,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
       const res = await fetch('/api/ai-sentence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ level: profile.current_level }),
+        body: JSON.stringify({ level: profile.current_level, nativeLang: settings.nativeLanguage, studyLang: settings.studyLanguage }),
       })
       const json = await res.json()
       if (res.ok && json.sentence) {
@@ -229,7 +232,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     } catch (e) {
       return { sentence: null, error: String(e) }
     }
-  }, [profile.current_level])
+  }, [profile.current_level, settings.nativeLanguage, settings.studyLanguage])
 
   const prefetchNextAiSentence = useCallback(async () => {
     if (prefetchingAiRef.current) return
@@ -357,6 +360,43 @@ export default function GameClient({ userId, initialProfile }: Props) {
     }
     setResetOpen(null)
   }, [toeflStatuses, userId, supabase])
+
+  // TOEFL spaced rep: correctly-solved exercises, categorized by (lastWrongAt → correctAt) interval
+  const getToeflSpacedCat = (v: { isCorrect: boolean; attemptedAt: string; lastWrongAt: string | null }): ReviewCategory | null => {
+    if (!v.isCorrect || !v.lastWrongAt) return null
+    return computeReviewCategory(new Date(v.lastWrongAt), new Date(v.attemptedAt))
+  }
+
+  const startToeflSpacedRep = useCallback(async (cat: ReviewCategory) => {
+    toeflContextRef.current   = 'spaced'
+    toeflSpacedCatRef.current = cat
+    const ids = Object.entries(toeflStatuses)
+      .filter(([, v]) => getToeflSpacedCat(v) === cat)
+      .map(([id]) => Number(id))
+    if (ids.length === 0) { setPhase('mode-select'); return }
+    const randomId = ids[Math.floor(Math.random() * ids.length)]
+    setPhase('toefl-loading')
+    const { data: exercise, error } = await supabase.from('toefl_exercises').select('*').eq('id', randomId).single()
+    if (error || !exercise) { setAiError('TOEFL 문제를 불러오지 못했습니다.'); setPhase('mode-select'); return }
+    launchToeflExercise(exercise as ToeflExercise)
+  }, [toeflStatuses, supabase, launchToeflExercise])
+
+  const openToeflList = useCallback(async (cat: ReviewCategory) => {
+    const now = new Date()
+    const ids = Object.entries(toeflStatuses)
+      .filter(([, v]) => !v.isCorrect && !!v.lastWrongAt && computeReviewCategory(new Date(v.lastWrongAt), now) === cat)
+      .map(([id]) => Number(id))
+    if (ids.length === 0) { setListItems([]); setListOpen(cat); return }
+    const { data } = await supabase.from('toefl_exercises').select('*').in('id', ids)
+    setListItems((data ?? []) as ToeflExercise[])
+    setListOpen(cat)
+  }, [toeflStatuses, supabase])
+
+  const deleteSingleToefl = useCallback(async (exerciseId: number) => {
+    await supabase.from('user_toefl_status').delete().eq('user_id', userId).eq('exercise_id', exerciseId)
+    setToeflStatuses(prev => { const next = { ...prev }; delete next[exerciseId]; return next })
+    setListItems(prev => prev.filter(e => e.id !== exerciseId))
+  }, [userId, supabase])
 
   const submitToeflAnswer = useCallback(async (answer: string[]) => {
     if (!currentToefl || !startTime || submittingRef.current) return
@@ -663,9 +703,13 @@ const handleTimerExpire = useCallback(() => {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={toeflContextRef.current === 'wrong' ? () => startToeflReview(toeflWrongCatRef.current) : startToefl}
+            onClick={
+              toeflContextRef.current === 'wrong'  ? () => startToeflReview(toeflWrongCatRef.current) :
+              toeflContextRef.current === 'spaced' ? () => startToeflSpacedRep(toeflSpacedCatRef.current) :
+              startToefl
+            }
             className="flex-1 py-3 bg-orange-500 text-white font-semibold rounded-xl hover:bg-orange-600 transition-colors">
-            {toeflContextRef.current === 'wrong' ? '다음 틀린 문제' : '다음 문제'}
+            {toeflContextRef.current === 'wrong' ? '다음 틀린 문제' : toeflContextRef.current === 'spaced' ? '다음 복습 문제' : '다음 문제'}
           </button>
           <button onClick={() => { setPhase('mode-select') }}
             className="px-5 py-3 bg-white text-slate-700 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
@@ -901,23 +945,83 @@ const handleTimerExpire = useCallback(() => {
                         >⚙</button>
                       </div>
                       {resetOpen === cat && (
-                        <div className="mt-1 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm">
-                          <p className="text-red-700 font-medium mb-2">이 그룹의 틀린 기록을 초기화할까요?</p>
+                        <div className="mt-1 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm space-y-2">
                           <div className="flex gap-2">
                             <button
-                              onClick={() => resetToeflCategory(cat)}
+                              onClick={() => { setResetOpen(null); resetToeflCategory(cat) }}
                               className="flex-1 py-1.5 bg-red-500 text-white text-xs font-semibold rounded-lg hover:bg-red-600 transition-colors"
-                            >초기화</button>
+                            >전체 초기화</button>
+                            <button
+                              onClick={() => { setResetOpen(null); openToeflList(cat) }}
+                              className="flex-1 py-1.5 bg-white text-slate-700 text-xs font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                            >리스트 보기</button>
                             <button
                               onClick={() => setResetOpen(null)}
-                              className="flex-1 py-1.5 bg-white text-slate-600 text-xs font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
-                            >취소</button>
+                              className="px-3 py-1.5 bg-white text-slate-400 text-xs rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
+                            >✕</button>
                           </div>
+                        </div>
+                      )}
+                      {listOpen === cat && (
+                        <div className="mt-1 border border-slate-200 rounded-xl overflow-hidden text-sm">
+                          <div className="flex items-center justify-between px-3 py-2 bg-slate-50 border-b border-slate-200">
+                            <span className="font-medium text-slate-700 text-xs">{label} 목록</span>
+                            <button onClick={() => setListOpen(null)} className="text-slate-400 hover:text-slate-600 text-xs">✕ 닫기</button>
+                          </div>
+                          {listItems.length === 0
+                            ? <p className="px-3 py-3 text-slate-400 text-xs">항목 없음</p>
+                            : listItems.map(ex => (
+                              <div key={ex.id} className="flex items-start gap-2 px-3 py-2 border-b border-slate-100 last:border-0">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-slate-500 text-xs truncate italic">{ex.sentence1_en}</p>
+                                  <p className="text-slate-700 text-xs font-medium truncate">{ex.sentence2_en}</p>
+                                </div>
+                                <button
+                                  onClick={() => deleteSingleToefl(ex.id)}
+                                  className="flex-shrink-0 text-xs text-red-400 hover:text-red-600 px-2 py-1 hover:bg-red-50 rounded-lg transition-colors"
+                                >삭제</button>
+                              </div>
+                            ))
+                          }
                         </div>
                       )}
                     </div>
                   )
                 })
+              })()}
+
+              {/* TOEFL spaced rep — correctly solved exercises */}
+              {(() => {
+                const spacedCats: { cat: ReviewCategory; label: string }[] = [
+                  { cat: '24h', label: '24시간 이내 맞힌 문제' },
+                  { cat: '1w',  label: '24시간~1주일 맞힌 문제' },
+                  { cat: '3m',  label: '1주일~3개월 맞힌 문제' },
+                  { cat: '1y',  label: '3개월~1년 맞힌 문제' },
+                  { cat: 'old', label: '1년 이상 맞힌 문제' },
+                ]
+                const hasAny = spacedCats.some(({ cat }) =>
+                  Object.values(toeflStatuses).some(v => getToeflSpacedCat(v) === cat)
+                )
+                if (!hasAny) return null
+                return (
+                  <div className="mt-4">
+                    <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">TOEFL 맞힌 문제 복습</h3>
+                    <div className="space-y-2">
+                      {spacedCats.map(({ cat, label }) => {
+                        const count = Object.values(toeflStatuses).filter(v => getToeflSpacedCat(v) === cat).length
+                        return (
+                          <button key={cat} onClick={() => startToeflSpacedRep(cat)} disabled={count === 0}
+                            className="w-full text-left px-4 py-3 rounded-xl border-2 border-purple-100 bg-white hover:border-purple-400 hover:bg-purple-50 transition-all disabled:opacity-40">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-slate-700 text-sm">{label}</span>
+                              <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-600">{count}문제</span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
               })()}
             </div>
           </>
