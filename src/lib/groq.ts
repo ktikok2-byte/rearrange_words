@@ -1,5 +1,6 @@
-export const GROQ_MODEL      = 'llama-3.3-70b-versatile' // sentence generation + grammar check
-export const GROQ_MODEL_FAST = 'llama-3.1-8b-instant'   // topic generation (fast, light)
+export const GROQ_MODEL         = 'llama-3.3-70b-versatile'  // sentence generation
+export const GROQ_MODEL_FAST    = 'llama-3.1-8b-instant'    // topic generation (fast, light)
+export const GROQ_MODEL_GRAMMAR = 'openai/gpt-oss-120b'     // grammar validation
 export const GROQ_API_URL    = 'https://api.groq.com/openai/v1/chat/completions'
 
 const STRUCTURES = [
@@ -52,7 +53,7 @@ export async function checkEnglishGrammar(apiKey: string, ...sentences: string[]
     const content = await callGroq(apiKey, [{
       role: 'user',
       content: `Are all of the following English sentences grammatically correct and natural-sounding? Reply ONLY with JSON {"valid": true} or {"valid": false}.\n${list}`,
-    }], { temperature: 0.1, maxTokens: 20, jsonMode: true })
+    }], { temperature: 0.1, maxTokens: 20, jsonMode: true, model: GROQ_MODEL_GRAMMAR })
     return (JSON.parse(content) as { valid?: boolean }).valid !== false
   } catch {
     return true // fail open — don't block generation on validation errors

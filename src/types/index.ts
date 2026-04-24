@@ -1,6 +1,10 @@
-export type Language = 'ko' | 'en'
+export type Language =
+  | 'en' | 'ko' | 'ja' | 'zh' | 'es' | 'fr' | 'de' | 'pt' | 'it' | 'ru'
+  | 'ar' | 'hi' | 'nl' | 'pl' | 'tr' | 'vi' | 'th' | 'id' | 'ms' | 'sv'
+  | 'no' | 'da' | 'fi' | 'hu' | 'cs' | 'ro' | 'uk' | 'el' | 'he' | 'fa'
+  | 'sw' | 'ta' | 'bn'
 
-export type LanguagePair = 'ko-en' | 'en-ko'
+export type LanguagePair = string // e.g. 'ko-en', 'en-ja'
 
 export type GameMode =
   | 'unsolved'
@@ -93,9 +97,30 @@ export interface LevelHistoryRow {
   changed_at: string
 }
 
+// Native display name
 export const LANGUAGE_NAMES: Record<Language, string> = {
-  ko: '한국어',
-  en: 'English',
+  en: 'English',      ko: '한국어',       ja: '日本語',       zh: '中文',
+  es: 'Español',      fr: 'Français',     de: 'Deutsch',      pt: 'Português',
+  it: 'Italiano',     ru: 'Русский',      ar: 'العربية',      hi: 'हिन्दी',
+  nl: 'Nederlands',   pl: 'Polski',       tr: 'Türkçe',       vi: 'Tiếng Việt',
+  th: 'ภาษาไทย',     id: 'Bahasa Indonesia', ms: 'Bahasa Melayu', sv: 'Svenska',
+  no: 'Norsk',        da: 'Dansk',        fi: 'Suomi',        hu: 'Magyar',
+  cs: 'Čeština',      ro: 'Română',       uk: 'Українська',   el: 'Ελληνικά',
+  he: 'עברית',        fa: 'فارسی',        sw: 'Kiswahili',    ta: 'தமிழ்',
+  bn: 'বাংলা',
+}
+
+// English name for search
+export const LANGUAGE_ENGLISH_NAMES: Record<Language, string> = {
+  en: 'English',    ko: 'Korean',     ja: 'Japanese',   zh: 'Chinese',
+  es: 'Spanish',    fr: 'French',     de: 'German',     pt: 'Portuguese',
+  it: 'Italian',    ru: 'Russian',    ar: 'Arabic',     hi: 'Hindi',
+  nl: 'Dutch',      pl: 'Polish',     tr: 'Turkish',    vi: 'Vietnamese',
+  th: 'Thai',       id: 'Indonesian', ms: 'Malay',      sv: 'Swedish',
+  no: 'Norwegian',  da: 'Danish',     fi: 'Finnish',    hu: 'Hungarian',
+  cs: 'Czech',      ro: 'Romanian',   uk: 'Ukrainian',  el: 'Greek',
+  he: 'Hebrew',     fa: 'Persian',    sw: 'Swahili',    ta: 'Tamil',
+  bn: 'Bengali',
 }
 
 export interface ToeflExercise {

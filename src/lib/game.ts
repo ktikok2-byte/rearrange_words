@@ -1,4 +1,5 @@
 import { GameMode, LEVEL_WORD_RANGE, Profile, ReviewCategory, Sentence } from '@/types'
+import { normalizeForCompare } from '@/lib/word-utils'
 
 export function shuffleArray<T>(arr: T[]): T[] {
   const shuffled = [...arr]
@@ -19,7 +20,7 @@ export function calcTimerSeconds(wordCount: number): number {
 
 export function checkAnswer(userWords: string[], correct: string[]): boolean {
   if (userWords.length !== correct.length) return false
-  return userWords.every((w, i) => w === correct[i])
+  return userWords.every((w, i) => normalizeForCompare(w) === normalizeForCompare(correct[i]))
 }
 
 export function getLevelForWordCount(wordCount: number): number {

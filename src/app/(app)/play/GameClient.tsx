@@ -1,14 +1,16 @@
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { GameMode, Profile, ReviewCategory, Sentence, ToeflExercise, LANGUAGE_NAMES } from '@/types'
+import { GameMode, Profile, ReviewCategory, Sentence, ToeflExercise, LANGUAGE_NAMES, LANGUAGE_ENGLISH_NAMES } from '@/types'
 import {
   shuffleArray, tokenize, checkAnswer,
   filterSentencesByMode, calcNewProfile, nextSentenceStatus,
   computeReviewCategory, findNextUnsolvedSentence,
 } from '@/lib/game'
+import { parseWordSlots, toTileWord, type WordSlot } from '@/lib/word-utils'
+import { sounds } from '@/lib/sounds'
 import GameTimer from '@/components/GameTimer'
 import WordCard from '@/components/WordCard'
 import { useSettings } from '@/hooks/useSettings'
@@ -61,8 +63,8 @@ export default function GameClient({ userId, initialProfile }: Props) {
   const [answerEntries, setAnswerEntries]       = useState<{ word: string; sourceIdx: number }[]>([])
   const [usedIndices, setUsedIndices]           = useState<Set<number>>(new Set())
   const submittingRef  = useRef(false)
-  const sourceAreaRef  = useRef<HTMLDivElement>(null)
-  const [answerMinH, setAnswerMinH] = useState(56)
+
+  const [wordSlots, setWordSlots] = useState<WordSlot[]>([])
 
   const [timerSeconds, setTimerSeconds] = useState(3)
   const [timerPaused, setTimerPaused]   = useState(false)
@@ -185,8 +187,9 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ── Launch sentence ───────────────────────────────────────
   const launchSentence = useCallback((sentence: Sentence, _level: number, _selectedMode: GameMode) => {
-    const words   = tokenize(sentence.target_text)
-    const shuffled = shuffleArray(words)
+    const slots   = parseWordSlots(sentence.target_text)
+    const shuffled = shuffleArray(slots.map(s => s.tileWord))
+    setWordSlots(slots)
     setCurrentSentence(sentence)
     setShuffledWords(shuffled)
     setAnswerEntries([])
@@ -270,8 +273,10 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   const launchToeflExercise = useCallback((exercise: ToeflExercise) => {
     setCurrentToefl(exercise)
-    const words = [...exercise.sentence2_en.trim().split(/\s+/), exercise.dummy_word]
-    const shuffled = shuffleArray(words)
+    const slots    = parseWordSlots(exercise.sentence2_en)
+    const tileWords = slots.map(s => s.tileWord)
+    setWordSlots(slots)
+    const shuffled = shuffleArray([...tileWords, toTileWord(exercise.dummy_word)])
     setShuffledWords(shuffled)
     setAnswerEntries([])
     setUsedIndices(new Set())
@@ -358,13 +363,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
     submittingRef.current = true
     setTimerPaused(true)
 
-    const correctWords = currentToefl.sentence2_en.trim().split(/\s+/)
-    const isCorrect = answer.length === correctWords.length &&
-      answer.every((w, i) => w.toLowerCase() === correctWords[i].toLowerCase())
+    const correctWords = tokenize(currentToefl.sentence2_en)
+    const isCorrect = checkAnswer(answer, correctWords)
     const now = new Date()
     const timeTakenMs = now.getTime() - startTime.getTime()
 
-    if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
+    if (isCorrect) { sounds.correct() } else { sounds.wrong(); setShake(true); setTimeout(() => setShake(false), 500) }
 
     await supabase.from('user_toefl_status').insert({
       user_id:      userId,
@@ -480,20 +484,26 @@ export default function GameClient({ userId, initialProfile }: Props) {
   // ── Word interaction ──────────────────────────────────────
   const handleWordClick = (word: string, index: number) => {
     if (usedIndices.has(index) || submittingRef.current) return
+    sounds.wordPlace()
     const newUsed = new Set(usedIndices)
     newUsed.add(index)
     setUsedIndices(newUsed)
     const newEntries = [...answerEntries, { word, sourceIdx: index }]
     setAnswerEntries(newEntries)
-    // TOEFL has a dummy word so auto-submit is not applicable; only regular mode auto-submits
+    // Regular: auto-submit when all tiles placed
     if (phase !== 'toefl-playing' && newEntries.length === shuffledWords.length) {
       submitAnswer(newEntries.map(e => e.word))
+    }
+    // TOEFL: auto-submit when word_count2 tiles placed (dummy excluded)
+    if (phase === 'toefl-playing' && currentToefl && newEntries.length === currentToefl.word_count2) {
+      submitToeflAnswer(newEntries.map(e => e.word))
     }
   }
 
   const handleAnswerClick = (idx: number) => {
     const entry = answerEntries[idx]
     if (!entry) return
+    sounds.wordRemove()
     setAnswerEntries(answerEntries.filter((_, i) => i !== idx))
     const newUsed = new Set(usedIndices)
     newUsed.delete(entry.sourceIdx)
@@ -511,7 +521,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     const now          = new Date()
     const timeTakenMs  = now.getTime() - startTime.getTime()
 
-    if (!isCorrect) { setShake(true); setTimeout(() => setShake(false), 500) }
+    if (isCorrect) { sounds.correct() } else { sounds.wrong(); setShake(true); setTimeout(() => setShake(false), 500) }
 
     const prevStatus   = userStatuses[currentSentence.id] ?? 'unsolved'
     const newStatus    = nextSentenceStatus(prevStatus, mode, isCorrect)
@@ -599,13 +609,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
     setPhase('result')
   }, [currentSentence, startTime, mode, profile, userId, userStatuses, timerSeconds, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Measure source area (all words always rendered) to pre-allocate answer area height.
-  // useLayoutEffect fires before paint so there's no visible flash.
-  useLayoutEffect(() => {
-    if (sourceAreaRef.current) setAnswerMinH(sourceAreaRef.current.offsetHeight)
-  }, [shuffledWords])
-
-  const handleTimerExpire = useCallback(() => {
+const handleTimerExpire = useCallback(() => {
     if (phase === 'toefl-playing') {
       submitToeflAnswer(answerEntries.map(e => e.word))
     } else {
@@ -689,6 +693,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
           key={currentToefl.id}
           seconds={30}
           onExpire={handleTimerExpire}
+          onWarning={() => sounds.timerWarning()}
           paused={timerPaused}
         />
 
@@ -712,22 +717,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
-            <div
-              style={{ minHeight: answerMinH }}
-              className={`bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-                ${shake ? 'shake border-red-300' : 'border-orange-200'}`}
-            >
-              {answerEntries.length === 0 && (
-                <span className="text-slate-300 text-sm self-center w-full text-center">
-                  아래 단어를 순서대로 클릭하세요 (가짜 단어 1개 포함)
+            {/* TOEFL answer area — underline slots */}
+            <div className={`bg-white rounded-xl border-2 p-3 min-h-[3.5rem] flex flex-wrap gap-x-1 gap-y-2 items-end
+              ${shake ? 'shake border-red-300' : 'border-dashed border-orange-200'}`}>
+              {wordSlots.map((slot, i) => (
+                <span key={i} className="inline-flex items-end gap-0.5">
+                  {answerEntries[i]
+                    ? <WordCard word={answerEntries[i].word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+                    : <span className="inline-block border-b-2 border-orange-300 min-w-[2.5rem] h-9 mb-0.5" />
+                  }
+                  {slot.punct && <span className="text-slate-700 font-medium text-base leading-none pb-1">{slot.punct}</span>}
                 </span>
-              )}
-              {answerEntries.map((e, i) => (
-                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
               ))}
             </div>
 
-            <div ref={sourceAreaRef} className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {shuffledWords.map((word, i) => (
                 <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
                   <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
@@ -736,12 +740,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => { setAnswerEntries([]); setUsedIndices(new Set()) }}
+              <button onClick={() => { sounds.click(); setAnswerEntries([]); setUsedIndices(new Set()) }}
                 className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                 초기화
               </button>
               <button
-                onClick={() => actualAnswerCount > 0 && submitToeflAnswer(answerEntries.map(e => e.word))}
+                onClick={() => { if (actualAnswerCount > 0) { sounds.click(); submitToeflAnswer(answerEntries.map(e => e.word)) } }}
                 disabled={actualAnswerCount === 0}
                 className="flex-1 py-2.5 text-sm font-semibold text-white bg-orange-500 rounded-xl hover:bg-orange-600 disabled:opacity-40 transition-colors">
                 제출
@@ -926,9 +930,14 @@ export default function GameClient({ userId, initialProfile }: Props) {
             <span className="px-2 py-0.5 text-xs font-bold bg-purple-100 text-purple-600 rounded-full">AI 모드</span>
           )}
         </div>
-        <p className="text-slate-500 text-sm mb-6">
+        <p className="text-slate-500 text-sm mb-1">
           현재 레벨: <span className="font-bold text-blue-600">Lv.{profile.current_level}</span>
           {' '}({profile.current_level + 1}~{profile.current_level + 3}단어)
+        </p>
+        <p className="text-xs text-slate-400 mb-6">
+          모국어: <span className="font-medium text-slate-600">{LANGUAGE_ENGLISH_NAMES[settings.nativeLanguage] ?? settings.nativeLanguage}</span>
+          {' · '}학습 언어: <span className="font-medium text-slate-600">{LANGUAGE_ENGLISH_NAMES[settings.studyLanguage] ?? settings.studyLanguage}</span>
+          <span className="text-slate-300 ml-1">(설정에서 변경)</span>
         </p>
 
         {/* Main modes */}
@@ -1079,8 +1088,7 @@ export default function GameClient({ userId, initialProfile }: Props) {
 
   // ── Playing ───────────────────────────────────────────────
   if (phase === 'playing' && currentSentence) {
-    const correctWords = tokenize(currentSentence.target_text)
-    const langName     = LANGUAGE_NAMES[currentSentence.target_language]
+    const langName          = LANGUAGE_NAMES[currentSentence.target_language]
     const actualAnswerCount = answerEntries.length
 
     return (
@@ -1101,14 +1109,14 @@ export default function GameClient({ userId, initialProfile }: Props) {
               : mode === 'all'     ? '전체'
               : '스페이스드 복습'}
           </span>
-          <span>{langName} · {correctWords.length}단어</span>
+          <span>{langName} · {wordSlots.length}단어</span>
         </div>
 
-        {/* key=currentSentence.id resets timer on every new sentence, fixing same-word-count drift bug */}
         <GameTimer
           key={currentSentence.id}
           seconds={timerSeconds}
           onExpire={handleTimerExpire}
+          onWarning={() => sounds.timerWarning()}
           paused={timerPaused}
         />
 
@@ -1130,26 +1138,21 @@ export default function GameClient({ userId, initialProfile }: Props) {
           </div>
         ) : (
           <>
-            {/* Answer area: on top so the built sentence is always visible above the finger.
-                min-height is pre-allocated from the source area measurement so source never shifts. */}
-            <div
-              style={{ minHeight: answerMinH }}
-              className={`bg-white rounded-xl border-2 border-dashed p-3 flex flex-wrap gap-2 items-start
-                ${shake ? 'shake border-red-300' : 'border-slate-300'}`}
-            >
-              {answerEntries.length === 0 && (
-                <span className="text-slate-300 text-sm self-center w-full text-center">
-                  아래 단어를 순서대로 클릭하세요
+            {/* Answer area — underline slots with placed words */}
+            <div className={`bg-white rounded-xl border-2 p-3 min-h-[3.5rem] flex flex-wrap gap-x-1 gap-y-2 items-end
+              ${shake ? 'shake border-red-300' : 'border-dashed border-slate-300'}`}>
+              {wordSlots.map((slot, i) => (
+                <span key={i} className="inline-flex items-end gap-0.5">
+                  {answerEntries[i]
+                    ? <WordCard word={answerEntries[i].word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
+                    : <span className="inline-block border-b-2 border-slate-400 min-w-[2.5rem] h-9 mb-0.5" />
+                  }
+                  {slot.punct && <span className="text-slate-700 font-medium text-base leading-none pb-1">{slot.punct}</span>}
                 </span>
-              )}
-              {answerEntries.map((e, i) => (
-                <WordCard key={i} word={e.word} onClick={() => handleAnswerClick(i)} variant="answer" index={i} />
               ))}
             </div>
 
-            {/* Source area: below answer, measured with ref to drive answer min-height above.
-                Used words become invisible but keep their slot so remaining words don't reflow. */}
-            <div ref={sourceAreaRef} className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {shuffledWords.map((word, i) => (
                 <div key={i} className={usedIndices.has(i) ? 'invisible pointer-events-none' : ''}>
                   <WordCard word={word} onClick={() => handleWordClick(word, i)} variant="source" index={i} />
@@ -1158,12 +1161,12 @@ export default function GameClient({ userId, initialProfile }: Props) {
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => { setAnswerEntries([]); setUsedIndices(new Set()) }}
+              <button onClick={() => { sounds.click(); setAnswerEntries([]); setUsedIndices(new Set()) }}
                 className="flex-1 py-2.5 text-sm text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                 초기화
               </button>
               <button
-                onClick={() => actualAnswerCount > 0 && submitAnswer(answerEntries.map(e => e.word))}
+                onClick={() => { if (actualAnswerCount > 0) { sounds.click(); submitAnswer(answerEntries.map(e => e.word)) } }}
                 disabled={actualAnswerCount === 0}
                 className="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors">
                 제출
